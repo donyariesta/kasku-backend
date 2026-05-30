@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\FundsAccount;
 use App\Models\PaymentBreakdown;
+use App\Support\PaymentCode;
 use Illuminate\Support\Facades\DB;
 
 class DepositDistributionService
@@ -63,7 +64,8 @@ class DepositDistributionService
             })
             ->whereHas('payment', fn ($q) => $q
                 ->where('tenantId', $depositAccount->tenantId)
-                ->where('status', 'paid'))
+                ->where('status', 'paid')
+                ->where('code', PaymentCode::MONTHLY_PAYMENT))
             ->with('payment')
             ->get();
 

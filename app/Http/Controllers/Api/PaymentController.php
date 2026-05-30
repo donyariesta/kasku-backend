@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Models\FundsAccount;
 use App\Models\Payment;
 use App\Models\PaymentBreakdown;
+use App\Support\PaymentCode;
 use App\Support\Roles;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -42,6 +43,7 @@ class PaymentController extends BaseApiController
             'amount' => 'required|numeric|min:0',
             'date' => 'nullable|date',
             'status' => 'nullable|string',
+            'code' => 'nullable|integer|in:1,2',
             'notes' => 'nullable|string',
             'breakdowns' => 'required|array|min:1',
             'breakdowns.*.amount' => 'required|numeric|min:0',
@@ -70,6 +72,7 @@ class PaymentController extends BaseApiController
                 'tenantId' => $tenantId,
                 'treasurerId' => $request->user()->id,
                 'status' => $payload['status'] ?? 'paid',
+                'code' => $payload['code'] ?? PaymentCode::MONTHLY_PAYMENT,
                 'notes' => $payload['notes'] ?? null,
             ]);
 

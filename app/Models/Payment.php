@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\PaymentCode;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -22,13 +23,25 @@ class Payment extends Model
         'date',
         'treasurerId',
         'status',
+        'code',
         'notes',
     ];
 
     protected $casts = [
         'date' => 'datetime',
         'amount' => 'float',
+        'code' => 'integer',
     ];
+
+    public function isMonthlyPayment(): bool
+    {
+        return (int) $this->code === PaymentCode::MONTHLY_PAYMENT;
+    }
+
+    public function isDonation(): bool
+    {
+        return (int) $this->code === PaymentCode::DONATION;
+    }
 
     public function member(): BelongsTo
     {
