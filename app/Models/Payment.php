@@ -30,6 +30,7 @@ class Payment extends Model
     protected $casts = [
         'date' => 'datetime',
         'distributedAt' => 'datetime',
+        'amount' => 'float',
     ];
 
     public function member(): BelongsTo
