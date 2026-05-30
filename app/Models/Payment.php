@@ -17,20 +17,28 @@ class Payment extends Model
     protected $fillable = [
         'memberId',
         'tenantId',
+        'fundsAccountId',
         'month',
         'year',
         'amount',
         'date',
         'treasurerId',
         'status',
+        'distributedAt',
     ];
 
     protected $casts = [
         'date' => 'datetime',
+        'distributedAt' => 'datetime',
     ];
 
     public function member(): BelongsTo
     {
         return $this->belongsTo(Member::class, 'memberId');
+    }
+
+    public function fundsAccount(): BelongsTo
+    {
+        return $this->belongsTo(FundsAccount::class, 'fundsAccountId');
     }
 }

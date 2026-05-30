@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Tenant;
 use App\Support\Roles;
+use Database\Seeders\FundsAccountSeeder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -39,6 +40,9 @@ class TenantController extends BaseApiController
             'slug' => 'required|string|unique:Tenant,slug',
         ]);
 
-        return response()->json(Tenant::create($payload));
+        $tenant = Tenant::create($payload);
+        FundsAccountSeeder::seedForTenant($tenant);
+
+        return response()->json($tenant);
     }
 }

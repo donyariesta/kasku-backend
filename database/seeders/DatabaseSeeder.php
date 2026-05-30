@@ -49,6 +49,8 @@ class DatabaseSeeder extends Seeder
             'tenantId' => $tenant->id,
         ]);
 
+        $this->call(FundsAccountSeeder::class);
+
         $expenseTypes = [
             ['type' => 'maintenance', 'description' => 'Expenses type maintenance'],
             ['type' => 'security', 'description' => 'Expenses type security'],

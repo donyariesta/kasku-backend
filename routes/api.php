@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ExpenseController;
+use App\Http\Controllers\Api\FundsAccountController;
+use App\Http\Controllers\Api\FundsTransferController;
 use App\Http\Controllers\Api\GroupController;
 use App\Http\Controllers\Api\MemberController;
 use App\Http\Controllers\Api\PaymentController;
@@ -43,6 +45,13 @@ Route::middleware('api.auth')->group(function (): void {
     Route::get('users', [UserController::class, 'index']);
     Route::post('users', [UserController::class, 'store']);
     Route::put('users/{user}/role', [UserController::class, 'updateRole']);
+
+    Route::get('funds-accounts', [FundsAccountController::class, 'index']);
+    Route::post('funds-accounts', [FundsAccountController::class, 'store']);
+    Route::put('funds-accounts/{fundsAccount}', [FundsAccountController::class, 'update']);
+    Route::delete('funds-accounts/{fundsAccount}', [FundsAccountController::class, 'destroy']);
+
+    Route::get('funds-transfers', [FundsTransferController::class, 'index']);
 
     Route::get('types', [TypeController::class, 'index']);
     Route::post('types', [TypeController::class, 'store']);
