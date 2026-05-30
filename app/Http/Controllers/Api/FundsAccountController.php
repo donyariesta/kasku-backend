@@ -111,7 +111,7 @@ class FundsAccountController extends BaseApiController
             return response()->json(['error' => 'System funds accounts cannot be deleted'], 400);
         }
 
-        if ($record->payments()->exists() || $record->expenses()->exists()) {
+        if ($record->paymentBreakdowns()->exists() || $record->expenses()->exists()) {
             return response()->json(['error' => 'Cannot delete funds account with existing transactions'], 400);
         }
 

@@ -5,15 +5,15 @@ namespace App\Services;
 use App\Models\Expense;
 use App\Models\FundsAccount;
 use App\Models\FundsTransfer;
-use App\Models\Payment;
+use App\Models\PaymentBreakdown;
 
 class FundsAccountBalanceService
 {
     public function balance(FundsAccount $account): float
     {
-        $income = Payment::query()
+        $income = PaymentBreakdown::query()
             ->where('fundsAccountId', $account->id)
-            ->where('status', 'paid')
+            ->whereHas('payment', fn ($q) => $q->where('status', 'paid'))
             ->sum('amount');
 
         $spent = Expense::query()

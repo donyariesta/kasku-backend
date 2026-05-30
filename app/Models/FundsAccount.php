@@ -48,9 +48,9 @@ class FundsAccount extends Model
         return $this->belongsTo(Tenant::class, 'tenantId');
     }
 
-    public function payments(): HasMany
+    public function paymentBreakdowns(): HasMany
     {
-        return $this->hasMany(Payment::class, 'fundsAccountId');
+        return $this->hasMany(PaymentBreakdown::class, 'fundsAccountId');
     }
 
     public function expenses(): HasMany

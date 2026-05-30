@@ -34,7 +34,7 @@ class FundsAccountSeeder extends Seeder
             ],
             [
                 'active' => true,
-                'monthlyAmount' => 0,
+                'monthlyAmount' => 100,
                 'isSystem' => false,
             ]
         );

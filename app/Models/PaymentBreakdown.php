@@ -6,37 +6,34 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Payment extends Model
+class PaymentBreakdown extends Model
 {
     use HasFactory, HasUuids;
 
-    protected $table = 'Payment';
+    protected $table = 'PaymentBreakdown';
     public $timestamps = false;
 
     protected $fillable = [
-        'memberId',
-        'tenantId',
+        'paymentId',
         'amount',
-        'date',
-        'treasurerId',
-        'status',
+        'fundsAccountId',
+        'month',
+        'year',
         'notes',
     ];
 
     protected $casts = [
-        'date' => 'datetime',
         'amount' => 'float',
     ];
 
-    public function member(): BelongsTo
+    public function payment(): BelongsTo
     {
-        return $this->belongsTo(Member::class, 'memberId');
+        return $this->belongsTo(Payment::class, 'paymentId');
     }
 
-    public function breakdowns(): HasMany
+    public function fundsAccount(): BelongsTo
     {
-        return $this->hasMany(PaymentBreakdown::class, 'paymentId');
+        return $this->belongsTo(FundsAccount::class, 'fundsAccountId');
     }
 }

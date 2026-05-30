@@ -7,24 +7,24 @@ use Illuminate\Console\Command;
 
 class DistributeDepositFundsCommand extends Command
 {
-    protected $signature = 'deposit:distribute {--tenant= : Limit to a tenant UUID}';
+    protected $signature = 'deposit:distribute {tenantId?}';
 
-    protected $description = 'Distribute eligible Deposit funds to other accounts by monthlyAmount percentage';
+    protected $description = 'Distribute deposit payment breakdowns to target funds accounts';
 
     public function handle(DepositDistributionService $service): int
     {
-        $tenantId = $this->option('tenant');
+        $tenantId = $this->argument('tenantId');
+        $results = $service->distribute($tenantId);
 
-        if ($tenantId) {
-            $tenant = \App\Models\Tenant::query()->findOrFail($tenantId);
-            $result = $service->distributeForTenant($tenant);
-            $this->info(json_encode($result, JSON_PRETTY_PRINT));
-            return self::SUCCESS;
-        }
+        $this->info(sprintf('Distributed %d deposit breakdown(s).', count($results)));
 
-        $results = $service->distributeAll();
         foreach ($results as $result) {
-            $this->line(json_encode($result));
+            $this->line(sprintf(
+                '  Payment %s: %s → %s',
+                $result['paymentId'],
+                number_format($result['amount'], 2),
+                implode(', ', $result['accounts'])
+            ));
         }
 
         return self::SUCCESS;

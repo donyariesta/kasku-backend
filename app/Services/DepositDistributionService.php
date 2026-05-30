@@ -3,156 +3,115 @@
 namespace App\Services;
 
 use App\Models\FundsAccount;
-use App\Models\Payment;
-use App\Models\Tenant;
-use Carbon\Carbon;
-use Illuminate\Support\Collection;
+use App\Models\PaymentBreakdown;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 class DepositDistributionService
 {
-    public function distributeForTenant(Tenant $tenant, ?Carbon $asOf = null): array
+    /**
+     * Split deposit PaymentBreakdown rows into target-account breakdowns
+     * when the payment target month has been reached.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function distribute(?string $tenantId = null): array
     {
-        $asOf ??= now();
-        $depositAccount = FundsAccount::query()
-            ->where('tenantId', $tenant->id)
+        $query = FundsAccount::query()
             ->where('isSystem', true)
-            ->where('name', FundsAccount::DEPOSIT_NAME)
-            ->first();
+            ->where('name', FundsAccount::DEPOSIT_NAME);
 
-        if (!$depositAccount) {
-            return ['tenantId' => $tenant->id, 'converted' => 0, 'payments' => 0, 'skipped' => 'no_deposit_account'];
+        if ($tenantId) {
+            $query->where('tenantId', $tenantId);
         }
 
+        $results = [];
+        foreach ($query->get() as $depositAccount) {
+            $results = array_merge($results, $this->distributeForDepositAccount($depositAccount));
+        }
+
+        return $results;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function distributeForDepositAccount(FundsAccount $depositAccount): array
+    {
+        $now = now();
+        $currentMonth = (int) $now->format('n');
+        $currentYear = (int) $now->format('Y');
+
         $targetAccounts = FundsAccount::query()
-            ->where('tenantId', $tenant->id)
+            ->where('tenantId', $depositAccount->tenantId)
             ->where('active', true)
             ->where('isSystem', false)
             ->where('monthlyAmount', '>', 0)
             ->get();
 
-        if ($targetAccounts->isEmpty()) {
-            return ['tenantId' => $tenant->id, 'converted' => 0, 'payments' => 0, 'skipped' => 'no_target_accounts'];
+        $totalMonthly = $targetAccounts->sum('monthlyAmount');
+        if ($totalMonthly <= 0 || $targetAccounts->isEmpty()) {
+            return [];
         }
 
-        $eligiblePayments = $this->eligiblePayments($depositAccount->id, $asOf);
-        if ($eligiblePayments->isEmpty()) {
-            return ['tenantId' => $tenant->id, 'converted' => 0, 'payments' => 0, 'skipped' => 'no_eligible_payments'];
-        }
-
-        $totalConverted = 0.0;
-        $paymentCount = 0;
-        $createdCount = 0;
-
-        DB::transaction(function () use (
-            $targetAccounts,
-            $eligiblePayments,
-            &$totalConverted,
-            &$paymentCount,
-            &$createdCount
-        ): void {
-            foreach ($eligiblePayments as $payment) {
-                $allocations = $this->allocateByMonthlyAmount($targetAccounts, (float) $payment->amount);
-                if ($allocations->isEmpty()) {
-                    continue;
-                }
-
-                foreach ($allocations as $allocation) {
-                    Payment::create([
-                        'memberId' => $payment->memberId,
-                        'tenantId' => $payment->tenantId,
-                        'fundsAccountId' => $allocation['account']->id,
-                        'month' => $payment->month,
-                        'year' => $payment->year,
-                        'amount' => $allocation['amount'],
-                        'date' => $payment->date,
-                        'treasurerId' => $payment->treasurerId,
-                        'status' => $payment->status,
-                    ]);
-                    $createdCount++;
-                }
-
-                $totalConverted += (float) $payment->amount;
-                $paymentCount++;
-                $payment->delete();
-            }
-        });
-
-        Log::info('Deposit distribution completed', [
-            'tenantId' => $tenant->id,
-            'converted' => $totalConverted,
-            'payments' => $paymentCount,
-            'createdPayments' => $createdCount,
-        ]);
-
-        return [
-            'tenantId' => $tenant->id,
-            'converted' => $totalConverted,
-            'payments' => $paymentCount,
-            'createdPayments' => $createdCount,
-        ];
-    }
-
-    public function distributeAll(?Carbon $asOf = null): array
-    {
-        $results = [];
-        Tenant::query()->orderBy('name')->each(function (Tenant $tenant) use (&$results, $asOf): void {
-            $results[] = $this->distributeForTenant($tenant, $asOf);
-        });
-
-        return $results;
-    }
-
-    private function eligiblePayments(string $depositAccountId, Carbon $asOf): Collection
-    {
-        return Payment::query()
-            ->where('fundsAccountId', $depositAccountId)
-            ->where('status', 'paid')
-            ->where(function ($query) use ($asOf): void {
-                $query->where('year', '<', $asOf->year)
-                    ->orWhere(function ($inner) use ($asOf): void {
-                        $inner->where('year', $asOf->year)
-                            ->where('month', '<=', $asOf->month);
+        $eligibleBreakdowns = PaymentBreakdown::query()
+            ->where('fundsAccountId', $depositAccount->id)
+            ->where(function ($q) use ($currentYear, $currentMonth): void {
+                $q->where('year', '<', $currentYear)
+                    ->orWhere(function ($q2) use ($currentYear, $currentMonth): void {
+                        $q2->where('year', $currentYear)->where('month', '<=', $currentMonth);
                     });
             })
-            ->orderBy('year')
-            ->orderBy('month')
+            ->whereHas('payment', fn ($q) => $q
+                ->where('tenantId', $depositAccount->tenantId)
+                ->where('status', 'paid'))
+            ->with('payment')
             ->get();
-    }
 
-    /**
-     * @return Collection<int, array{account: FundsAccount, amount: float, percentage: float}>
-     */
-    private function allocateByMonthlyAmount(Collection $targetAccounts, float $totalAmount): Collection
-    {
-        $monthlyTotal = $targetAccounts->sum('monthlyAmount');
-        if ($monthlyTotal <= 0) {
-            return collect();
+        $distributed = [];
+
+        foreach ($eligibleBreakdowns as $breakdown) {
+            $entry = DB::transaction(function () use ($breakdown, $targetAccounts, $totalMonthly) {
+                $remaining = (float) $breakdown->amount;
+                $accounts = [];
+
+                foreach ($targetAccounts->values() as $index => $account) {
+                    $isLast = $index === $targetAccounts->count() - 1;
+                    $share = $isLast
+                        ? $remaining
+                        : round($breakdown->amount * ($account->monthlyAmount / $totalMonthly), 2);
+
+                    if ($share <= 0) {
+                        continue;
+                    }
+
+                    $remaining -= $share;
+
+                    PaymentBreakdown::create([
+                        'paymentId' => $breakdown->paymentId,
+                        'amount' => $share,
+                        'fundsAccountId' => $account->id,
+                        'month' => $breakdown->month,
+                        'year' => $breakdown->year,
+                        'notes' => 'Distributed from deposit',
+                    ]);
+
+                    $accounts[] = $account->name;
+                }
+
+                $amount = $breakdown->amount;
+                $paymentId = $breakdown->paymentId;
+                $breakdown->delete();
+
+                return [
+                    'paymentId' => $paymentId,
+                    'amount' => $amount,
+                    'accounts' => $accounts,
+                ];
+            });
+
+            $distributed[] = $entry;
         }
 
-        $allocations = collect();
-        $assigned = 0.0;
-        $lastIndex = $targetAccounts->count() - 1;
-
-        foreach ($targetAccounts->values() as $index => $account) {
-            $percentage = ($account->monthlyAmount / $monthlyTotal) * 100;
-            $amount = $index === $lastIndex
-                ? round($totalAmount - $assigned, 2)
-                : round($totalAmount * ($account->monthlyAmount / $monthlyTotal), 2);
-
-            if ($amount <= 0) {
-                continue;
-            }
-
-            $assigned += $amount;
-            $allocations->push([
-                'account' => $account,
-                'amount' => $amount,
-                'percentage' => round($percentage, 2),
-            ]);
-        }
-
-        return $allocations;
+        return $distributed;
     }
 }

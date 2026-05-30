@@ -4,17 +4,21 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\FundsAccount;
 use App\Models\Payment;
+use App\Models\PaymentBreakdown;
 use App\Support\Roles;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class PaymentController extends BaseApiController
 {
     public function index(Request $request): JsonResponse
     {
         $tenantId = $this->resolveTenantId($request);
-        $query = Payment::query()->with(['member', 'fundsAccount'])->orderByDesc('date');
+        $query = Payment::query()
+            ->with(['member', 'breakdowns.fundsAccount'])
+            ->orderByDesc('date');
         if ($tenantId) {
             $query->where('tenantId', $tenantId);
         }
@@ -35,27 +39,55 @@ class PaymentController extends BaseApiController
 
         $payload = $request->validate([
             'memberId' => 'required|uuid',
-            'fundsAccountId' => 'required|uuid',
-            'month' => 'required|integer',
-            'year' => 'required|integer',
-            'amount' => 'required|numeric',
+            'amount' => 'required|numeric|min:0',
             'date' => 'nullable|date',
             'status' => 'nullable|string',
+            'notes' => 'nullable|string',
+            'breakdowns' => 'required|array|min:1',
+            'breakdowns.*.amount' => 'required|numeric|min:0',
+            'breakdowns.*.fundsAccountId' => 'required|uuid',
+            'breakdowns.*.month' => 'required|integer|min:1|max:12',
+            'breakdowns.*.year' => 'required|integer',
+            'breakdowns.*.notes' => 'nullable|string',
         ]);
 
-        if ($error = $this->validateFundsAccount($tenantId, $payload['fundsAccountId'])) {
-            return $error;
+        $breakdownTotal = collect($payload['breakdowns'])->sum('amount');
+        if (round($breakdownTotal, 2) !== round((float) $payload['amount'], 2)) {
+            return response()->json(['error' => 'Breakdown amounts must sum to payment amount'], 400);
         }
 
-        $payment = Payment::create([
-            ...$payload,
-            'date' => $payload['date'] ?? now(),
-            'tenantId' => $tenantId,
-            'treasurerId' => $request->user()->id,
-            'status' => $payload['status'] ?? 'paid',
-        ]);
+        foreach ($payload['breakdowns'] as $breakdown) {
+            if ($error = $this->validateFundsAccount($tenantId, $breakdown['fundsAccountId'])) {
+                return $error;
+            }
+        }
 
-        return response()->json($payment->load(['member', 'fundsAccount']));
+        $payment = DB::transaction(function () use ($payload, $tenantId, $request) {
+            $payment = Payment::create([
+                'memberId' => $payload['memberId'],
+                'amount' => $payload['amount'],
+                'date' => $payload['date'] ?? now(),
+                'tenantId' => $tenantId,
+                'treasurerId' => $request->user()->id,
+                'status' => $payload['status'] ?? 'paid',
+                'notes' => $payload['notes'] ?? null,
+            ]);
+
+            foreach ($payload['breakdowns'] as $breakdown) {
+                PaymentBreakdown::create([
+                    'paymentId' => $payment->id,
+                    'amount' => $breakdown['amount'],
+                    'fundsAccountId' => $breakdown['fundsAccountId'],
+                    'month' => $breakdown['month'],
+                    'year' => $breakdown['year'],
+                    'notes' => $breakdown['notes'] ?? null,
+                ]);
+            }
+
+            return $payment;
+        });
+
+        return response()->json($payment->load(['member', 'breakdowns.fundsAccount']));
     }
 
     private function validateFundsAccount(string $tenantId, string $fundsAccountId): ?JsonResponse
