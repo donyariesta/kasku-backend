@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\FundsAccount;
-use App\Models\FundsTransfer;
 use App\Models\Payment;
 use App\Models\Tenant;
 use Carbon\Carbon;
@@ -23,7 +22,7 @@ class DepositDistributionService
             ->first();
 
         if (!$depositAccount) {
-            return ['tenantId' => $tenant->id, 'transferred' => 0, 'periods' => 0, 'skipped' => 'no_deposit_account'];
+            return ['tenantId' => $tenant->id, 'converted' => 0, 'payments' => 0, 'skipped' => 'no_deposit_account'];
         }
 
         $targetAccounts = FundsAccount::query()
@@ -34,78 +33,64 @@ class DepositDistributionService
             ->get();
 
         if ($targetAccounts->isEmpty()) {
-            return ['tenantId' => $tenant->id, 'transferred' => 0, 'periods' => 0, 'skipped' => 'no_target_accounts'];
+            return ['tenantId' => $tenant->id, 'converted' => 0, 'payments' => 0, 'skipped' => 'no_target_accounts'];
         }
 
         $eligiblePayments = $this->eligiblePayments($depositAccount->id, $asOf);
         if ($eligiblePayments->isEmpty()) {
-            return ['tenantId' => $tenant->id, 'transferred' => 0, 'periods' => 0, 'skipped' => 'no_eligible_payments'];
+            return ['tenantId' => $tenant->id, 'converted' => 0, 'payments' => 0, 'skipped' => 'no_eligible_payments'];
         }
 
-        $totalTransferred = 0;
-        $periodCount = 0;
+        $totalConverted = 0.0;
+        $paymentCount = 0;
+        $createdCount = 0;
 
         DB::transaction(function () use (
-            $tenant,
-            $depositAccount,
             $targetAccounts,
             $eligiblePayments,
-            $asOf,
-            &$totalTransferred,
-            &$periodCount
+            &$totalConverted,
+            &$paymentCount,
+            &$createdCount
         ): void {
-            $grouped = $eligiblePayments->groupBy(fn (Payment $payment) => "{$payment->year}-{$payment->month}");
-
-            foreach ($grouped as $periodKey => $payments) {
-                [$year, $month] = array_map('intval', explode('-', $periodKey));
-                $periodTotal = $payments->sum('amount');
-
-                if ($periodTotal <= 0) {
-                    continue;
-                }
-
-                $allocations = $this->allocateByMonthlyAmount($targetAccounts, $periodTotal);
+            foreach ($eligiblePayments as $payment) {
+                $allocations = $this->allocateByMonthlyAmount($targetAccounts, (float) $payment->amount);
                 if ($allocations->isEmpty()) {
                     continue;
                 }
 
                 foreach ($allocations as $allocation) {
-                    FundsTransfer::create([
-                        'tenantId' => $tenant->id,
-                        'fromFundsAccountId' => $depositAccount->id,
-                        'toFundsAccountId' => $allocation['account']->id,
-                        'month' => $month,
-                        'year' => $year,
+                    Payment::create([
+                        'memberId' => $payment->memberId,
+                        'tenantId' => $payment->tenantId,
+                        'fundsAccountId' => $allocation['account']->id,
+                        'month' => $payment->month,
+                        'year' => $payment->year,
                         'amount' => $allocation['amount'],
-                        'date' => $asOf,
-                        'description' => sprintf(
-                            'Deposit distribution for %02d/%d (%.2f%%)',
-                            $month,
-                            $year,
-                            $allocation['percentage']
-                        ),
+                        'date' => $payment->date,
+                        'treasurerId' => $payment->treasurerId,
+                        'status' => $payment->status,
                     ]);
+                    $createdCount++;
                 }
 
-                Payment::query()
-                    ->whereIn('id', $payments->pluck('id'))
-                    ->update(['distributedAt' => $asOf]);
-
-                $totalTransferred += $periodTotal;
-                $periodCount++;
+                $totalConverted += (float) $payment->amount;
+                $paymentCount++;
+                $payment->delete();
             }
         });
 
         Log::info('Deposit distribution completed', [
             'tenantId' => $tenant->id,
-            'transferred' => $totalTransferred,
-            'periods' => $periodCount,
+            'converted' => $totalConverted,
+            'payments' => $paymentCount,
+            'createdPayments' => $createdCount,
         ]);
 
         return [
             'tenantId' => $tenant->id,
-            'transferred' => $totalTransferred,
-            'periods' => $periodCount,
+            'converted' => $totalConverted,
+            'payments' => $paymentCount,
+            'createdPayments' => $createdCount,
         ];
     }
 
@@ -124,7 +109,6 @@ class DepositDistributionService
         return Payment::query()
             ->where('fundsAccountId', $depositAccountId)
             ->where('status', 'paid')
-            ->whereNull('distributedAt')
             ->where(function ($query) use ($asOf): void {
                 $query->where('year', '<', $asOf->year)
                     ->orWhere(function ($inner) use ($asOf): void {

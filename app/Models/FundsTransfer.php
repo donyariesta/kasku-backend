@@ -29,6 +29,7 @@ class FundsTransfer extends Model
 
     protected $casts = [
         'date' => 'datetime',
+        'amount' => 'float',
     ];
 
     public function tenant(): BelongsTo

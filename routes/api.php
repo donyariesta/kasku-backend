@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\ExpenseController;
 use App\Http\Controllers\Api\FundsAccountController;
 use App\Http\Controllers\Api\FundsTransferController;
 use App\Http\Controllers\Api\GroupController;
+use App\Http\Controllers\Api\JobMonitorController;
 use App\Http\Controllers\Api\MemberController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\SettingController;
@@ -52,6 +53,8 @@ Route::middleware('api.auth')->group(function (): void {
     Route::delete('funds-accounts/{fundsAccount}', [FundsAccountController::class, 'destroy']);
 
     Route::get('funds-transfers', [FundsTransferController::class, 'index']);
+    Route::post('funds-transfers', [FundsTransferController::class, 'store']);
+    Route::delete('funds-transfers/{fundsTransfer}', [FundsTransferController::class, 'destroy']);
 
     Route::get('types', [TypeController::class, 'index']);
     Route::post('types', [TypeController::class, 'store']);
@@ -61,4 +64,10 @@ Route::middleware('api.auth')->group(function (): void {
     Route::get('settings', [SettingController::class, 'index']);
     Route::get('settings/{fieldId}', [SettingController::class, 'show']);
     Route::post('settings/upsert', [SettingController::class, 'upsert']);
+
+    Route::prefix('admin/jobs')->group(function (): void {
+        Route::get('/', [JobMonitorController::class, 'overview']);
+        Route::get('runs', [JobMonitorController::class, 'runs']);
+        Route::post('run', [JobMonitorController::class, 'run']);
+    });
 });
