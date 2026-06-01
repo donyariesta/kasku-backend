@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\FundsAccount;
+use App\Services\FundsAccountMonthlyTargetService;
 use App\Support\Roles;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -10,6 +11,10 @@ use Illuminate\Http\Request;
 
 class FundsAccountController extends BaseApiController
 {
+    public function __construct(
+        private readonly FundsAccountMonthlyTargetService $monthlyTargetService,
+    ) {}
+
     public function index(Request $request): JsonResponse
     {
         $tenantId = $this->resolveTenantId($request);
@@ -29,7 +34,12 @@ class FundsAccountController extends BaseApiController
             $query->where('isSystem', false);
         }
 
-        return response()->json($query->get());
+        $month = $request->integer('month') ?: (int) now()->format('n');
+        $year = $request->integer('year') ?: (int) now()->format('Y');
+
+        $accounts = $this->monthlyTargetService->attachMonthlyAmounts($query->get(), $month, $year);
+
+        return response()->json($accounts);
     }
 
     public function store(Request $request): JsonResponse
@@ -47,16 +57,25 @@ class FundsAccountController extends BaseApiController
             'name' => 'required|string|max:255',
             'active' => 'nullable|boolean',
             'monthlyAmount' => 'nullable|numeric|min:0',
+            'effectiveDate' => 'nullable|date',
         ]);
 
         try {
-            return response()->json(FundsAccount::create([
-                ...$payload,
+            $account = FundsAccount::create([
+                'name' => $payload['name'],
                 'tenantId' => $tenantId,
                 'active' => $payload['active'] ?? true,
-                'monthlyAmount' => $payload['monthlyAmount'] ?? 0,
+                'monthlyAmount' => 0,
                 'isSystem' => false,
-            ]));
+            ]);
+
+            $amount = (float) ($payload['monthlyAmount'] ?? 0);
+            $effectiveDate = $payload['effectiveDate'] ?? now()->toDateString();
+            $this->monthlyTargetService->createTarget($account, $amount, $effectiveDate);
+
+            $account->monthlyAmount = $amount;
+
+            return response()->json($account);
         } catch (QueryException) {
             return response()->json(['error' => 'A funds account with this name already exists'], 400);
         }
@@ -83,11 +102,28 @@ class FundsAccountController extends BaseApiController
             'name' => 'sometimes|required|string|max:255',
             'active' => 'nullable|boolean',
             'monthlyAmount' => 'nullable|numeric|min:0',
+            'effectiveDate' => 'nullable|date',
         ]);
 
         try {
-            $record->fill($payload);
-            $record->save();
+            if (array_key_exists('name', $payload) || array_key_exists('active', $payload)) {
+                $record->fill(collect($payload)->only(['name', 'active'])->all());
+                $record->save();
+            }
+
+            if (array_key_exists('monthlyAmount', $payload)) {
+                $effectiveDate = $payload['effectiveDate'] ?? now()->toDateString();
+                $this->monthlyTargetService->createTarget(
+                    $record,
+                    (float) $payload['monthlyAmount'],
+                    $effectiveDate
+                );
+            }
+
+            $month = (int) now()->format('n');
+            $year = (int) now()->format('Y');
+            $this->monthlyTargetService->attachMonthlyAmounts(collect([$record]), $month, $year);
+
             return response()->json($record);
         } catch (QueryException) {
             return response()->json(['error' => 'A funds account with this name already exists'], 400);

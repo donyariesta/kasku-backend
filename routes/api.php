@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\ExpenseController;
 use App\Http\Controllers\Api\FundsAccountController;
 use App\Http\Controllers\Api\FundsTransferController;
 use App\Http\Controllers\Api\GroupController;
+use App\Http\Controllers\Api\IuranController;
 use App\Http\Controllers\Api\JobMonitorController;
 use App\Http\Controllers\Api\MemberController;
 use App\Http\Controllers\Api\PaymentController;
@@ -34,6 +35,8 @@ Route::middleware('api.auth')->group(function (): void {
     Route::post('members', [MemberController::class, 'store']);
     Route::put('members/{member}', [MemberController::class, 'update']);
     Route::delete('members/{member}', [MemberController::class, 'destroy']);
+
+    Route::get('iuran', [IuranController::class, 'index']);
 
     Route::get('payments', [PaymentController::class, 'index']);
     Route::post('payments', [PaymentController::class, 'store']);

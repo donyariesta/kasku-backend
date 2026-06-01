@@ -9,6 +9,10 @@ use Illuminate\Support\Facades\DB;
 
 class DepositDistributionService
 {
+    public function __construct(
+        private readonly FundsAccountMonthlyTargetService $monthlyTargetService,
+    ) {}
+
     /**
      * Split deposit PaymentBreakdown rows into target-account breakdowns
      * when the payment target month has been reached.
@@ -46,11 +50,9 @@ class DepositDistributionService
             ->where('tenantId', $depositAccount->tenantId)
             ->where('active', true)
             ->where('isSystem', false)
-            ->where('monthlyAmount', '>', 0)
             ->get();
 
-        $totalMonthly = $targetAccounts->sum('monthlyAmount');
-        if ($totalMonthly <= 0 || $targetAccounts->isEmpty()) {
+        if ($targetAccounts->isEmpty()) {
             return [];
         }
 
@@ -72,15 +74,37 @@ class DepositDistributionService
         $distributed = [];
 
         foreach ($eligibleBreakdowns as $breakdown) {
-            $entry = DB::transaction(function () use ($breakdown, $targetAccounts, $totalMonthly) {
+            $month = (int) $breakdown->month;
+            $year = (int) $breakdown->year;
+
+            $amounts = $this->monthlyTargetService->amountsForPeriod($targetAccounts, $month, $year);
+            $accountsWithTargets = $targetAccounts->filter(
+                fn (FundsAccount $a) => ($amounts[$a->id] ?? 0) > 0
+            )->values();
+
+            $totalMonthly = $accountsWithTargets->sum(
+                fn (FundsAccount $a) => $amounts[$a->id] ?? 0
+            );
+
+            if ($totalMonthly <= 0 || $accountsWithTargets->isEmpty()) {
+                continue;
+            }
+
+            $entry = DB::transaction(function () use (
+                $breakdown,
+                $accountsWithTargets,
+                $amounts,
+                $totalMonthly
+            ) {
                 $remaining = (float) $breakdown->amount;
                 $accounts = [];
 
-                foreach ($targetAccounts->values() as $index => $account) {
-                    $isLast = $index === $targetAccounts->count() - 1;
+                foreach ($accountsWithTargets as $index => $account) {
+                    $shareAmount = $amounts[$account->id] ?? 0;
+                    $isLast = $index === $accountsWithTargets->count() - 1;
                     $share = $isLast
                         ? $remaining
-                        : round($breakdown->amount * ($account->monthlyAmount / $totalMonthly), 2);
+                        : round($breakdown->amount * ($shareAmount / $totalMonthly), 2);
 
                     if ($share <= 0) {
                         continue;

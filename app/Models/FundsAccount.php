@@ -48,6 +48,11 @@ class FundsAccount extends Model
         return $this->belongsTo(Tenant::class, 'tenantId');
     }
 
+    public function monthlyTargets(): HasMany
+    {
+        return $this->hasMany(FundsAccountMonthlyTarget::class, 'fundsAccountId');
+    }
+
     public function paymentBreakdowns(): HasMany
     {
         return $this->hasMany(PaymentBreakdown::class, 'fundsAccountId');

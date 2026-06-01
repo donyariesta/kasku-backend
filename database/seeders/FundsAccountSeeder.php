@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Models\FundsAccount;
 use App\Models\Tenant;
+use App\Services\FundsAccountMonthlyTargetService;
 use Illuminate\Database\Seeder;
 
 class FundsAccountSeeder extends Seeder
@@ -15,7 +16,9 @@ class FundsAccountSeeder extends Seeder
 
     public static function seedForTenant(Tenant $tenant): void
     {
-        FundsAccount::updateOrCreate(
+        $targetService = app(FundsAccountMonthlyTargetService::class);
+
+        $deposit = FundsAccount::updateOrCreate(
             [
                 'tenantId' => $tenant->id,
                 'name' => FundsAccount::DEPOSIT_NAME,
@@ -27,16 +30,24 @@ class FundsAccountSeeder extends Seeder
             ]
         );
 
-        FundsAccount::updateOrCreate(
+        if (!$deposit->monthlyTargets()->exists()) {
+            $targetService->createTarget($deposit, 0, $tenant->createdAt ?? now());
+        }
+
+        $general = FundsAccount::updateOrCreate(
             [
                 'tenantId' => $tenant->id,
                 'name' => 'Kas Umum',
             ],
             [
                 'active' => true,
-                'monthlyAmount' => 100,
+                'monthlyAmount' => 0,
                 'isSystem' => false,
             ]
         );
+
+        if (!$general->monthlyTargets()->exists()) {
+            $targetService->createTarget($general, 100, $tenant->createdAt ?? now());
+        }
     }
 }
