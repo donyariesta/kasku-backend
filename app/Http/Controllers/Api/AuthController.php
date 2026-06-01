@@ -56,4 +56,27 @@ class AuthController extends BaseApiController
     {
         return response()->json(['message' => 'Logged out'])->withoutCookie('token');
     }
+
+    public function updatePassword(Request $request): JsonResponse
+    {
+        $payload = $request->validate([
+            'currentPassword' => 'required|string',
+            'newPassword' => 'required|string|min:6|confirmed',
+        ]);
+
+        /** @var User|null $user */
+        $user = User::find($request->user()?->id);
+        if (!$user) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
+
+        if (!Hash::check($payload['currentPassword'], $user->password)) {
+            return response()->json(['error' => 'Current password is incorrect'], 400);
+        }
+
+        $user->password = Hash::make($payload['newPassword']);
+        $user->save();
+
+        return response()->json(['success' => true]);
+    }
 }

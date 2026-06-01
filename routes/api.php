@@ -20,6 +20,7 @@ Route::prefix('auth')->group(function (): void {
     Route::middleware('api.auth')->group(function (): void {
         Route::get('me', [AuthController::class, 'me']);
         Route::post('logout', [AuthController::class, 'logout']);
+        Route::put('password', [AuthController::class, 'updatePassword']);
     });
 });
 
@@ -48,7 +49,9 @@ Route::middleware('api.auth')->group(function (): void {
 
     Route::get('users', [UserController::class, 'index']);
     Route::post('users', [UserController::class, 'store']);
+    Route::put('users/{user}', [UserController::class, 'update']);
     Route::put('users/{user}/role', [UserController::class, 'updateRole']);
+    Route::delete('users/{user}', [UserController::class, 'destroy']);
 
     Route::get('funds-accounts', [FundsAccountController::class, 'index']);
     Route::post('funds-accounts', [FundsAccountController::class, 'store']);
