@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Member;
 use App\Models\Payment;
+use App\Models\PaymentBreakdown;
 use App\Support\PaymentCode;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -37,15 +38,29 @@ class IuranController extends BaseApiController
 
         $payments = Payment::query()
             ->where('tenantId', $tenantId)
-            ->where('code', PaymentCode::MONTHLY_PAYMENT)
+            ->whereIn('code', [PaymentCode::MONTHLY_PAYMENT, PaymentCode::COLLECTIVE_PAYMENT])
             ->where('status', 'paid')
             ->with('breakdowns')
             ->whereHas('breakdowns', fn ($q) => $q->where('year', $year))
-            ->get()
-            ->groupBy('memberId');
+            ->get();
 
-        $result = $members->map(function (Member $member) use ($payments, $year) {
-            $memberPayments = $payments->get($member->id, collect());
+        $paymentsByMember = collect();
+        foreach ($payments as $payment) {
+            /** @var PaymentBreakdown $breakdown */
+            foreach ($payment->breakdowns as $breakdown) {
+                if ((int) $breakdown->year !== $year || empty($breakdown->memberId)) {
+                    continue;
+                }
+                $memberPayments = $paymentsByMember->get($breakdown->memberId, collect());
+                if (!$memberPayments->contains(fn (Payment $p) => $p->id === $payment->id)) {
+                    $memberPayments->push($payment);
+                    $paymentsByMember->put($breakdown->memberId, $memberPayments);
+                }
+            }
+        }
+
+        $result = $members->map(function (Member $member) use ($paymentsByMember, $year) {
+            $memberPayments = $paymentsByMember->get($member->id, collect());
 
             $monthlyPaymentsStatus = [];
             for ($month = 1; $month <= 12; $month++) {
@@ -54,8 +69,10 @@ class IuranController extends BaseApiController
                     'month' => $month,
                     'year' => $year,
                     'status' => $payment ? 'paid' : 'unpaid',
-                    'paidAmount' => $payment ? (float) $payment->amount : 0.0,
-                    'paymentId' => $payment?->id,
+                    'paidAmount' => $payment ? $this->paidAmountForMemberPeriod($payment, $member->id, $month, $year) : 0.0,
+                    'paymentId' => $payment && (int) $payment->code === PaymentCode::MONTHLY_PAYMENT
+                        ? $payment->id
+                        : null,
                 ];
             }
 
@@ -76,14 +93,29 @@ class IuranController extends BaseApiController
     private function findPeriodPayment($memberPayments, int $month, int $year): ?Payment
     {
         return $memberPayments->first(function (Payment $payment) use ($month, $year) {
-            $breakdowns = $payment->breakdowns;
+            $breakdowns = $payment->breakdowns->filter(
+                fn (PaymentBreakdown $b) => !empty($b->memberId)
+            );
             if ($breakdowns->isEmpty()) {
                 return false;
             }
 
-            return $breakdowns->every(
-                fn ($b) => (int) $b->month === $month && (int) $b->year === $year
+            return $breakdowns->contains(
+                fn (PaymentBreakdown $b) =>
+                    (int) $b->month === $month
+                    && (int) $b->year === $year
             );
         });
+    }
+
+    private function paidAmountForMemberPeriod(Payment $payment, string $memberId, int $month, int $year): float
+    {
+        return (float) $payment->breakdowns
+            ->filter(fn (PaymentBreakdown $b) =>
+                $b->memberId === $memberId
+                && (int) $b->month === $month
+                && (int) $b->year === $year
+            )
+            ->sum('amount');
     }
 }

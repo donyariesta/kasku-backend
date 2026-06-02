@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\FundsAccount;
+use App\Models\Member;
 use App\Models\Payment;
 use App\Models\PaymentBreakdown;
 use App\Support\PaymentCode;
@@ -43,15 +44,27 @@ class PaymentController extends BaseApiController
             'amount' => 'required|numeric|min:0',
             'date' => 'nullable|date',
             'status' => 'nullable|string',
-            'code' => 'nullable|integer|in:1,2',
+            'code' => 'nullable|integer|in:1,2,3',
             'notes' => 'nullable|string',
             'breakdowns' => 'required|array|min:1',
+            'breakdowns.*.memberId' => 'required|uuid',
             'breakdowns.*.amount' => 'required|numeric|min:0',
             'breakdowns.*.fundsAccountId' => 'required|uuid',
             'breakdowns.*.month' => 'required|integer|min:1|max:12',
             'breakdowns.*.year' => 'required|integer',
             'breakdowns.*.notes' => 'nullable|string',
         ]);
+
+        $code = (int) ($payload['code'] ?? PaymentCode::MONTHLY_PAYMENT);
+
+        foreach ($payload['breakdowns'] as $breakdown) {
+            if (
+                $code !== PaymentCode::COLLECTIVE_PAYMENT
+                && $breakdown['memberId'] !== $payload['memberId']
+            ) {
+                return response()->json(['error' => 'Breakdown memberId must match payment memberId'], 400);
+            }
+        }
 
         $breakdownTotal = collect($payload['breakdowns'])->sum('amount');
         if (round($breakdownTotal, 2) !== round((float) $payload['amount'], 2)) {
@@ -62,9 +75,16 @@ class PaymentController extends BaseApiController
             if ($error = $this->validateFundsAccount($tenantId, $breakdown['fundsAccountId'])) {
                 return $error;
             }
+            if ($error = $this->validateMember($tenantId, $breakdown['memberId'])) {
+                return $error;
+            }
         }
 
-        $payment = DB::transaction(function () use ($payload, $tenantId, $request) {
+        if ($error = $this->validateMember($tenantId, $payload['memberId'])) {
+            return $error;
+        }
+
+        $payment = DB::transaction(function () use ($payload, $tenantId, $request, $code) {
             $payment = Payment::create([
                 'memberId' => $payload['memberId'],
                 'amount' => $payload['amount'],
@@ -72,13 +92,14 @@ class PaymentController extends BaseApiController
                 'tenantId' => $tenantId,
                 'treasurerId' => $request->user()->id,
                 'status' => $payload['status'] ?? 'paid',
-                'code' => $payload['code'] ?? PaymentCode::MONTHLY_PAYMENT,
+                'code' => $code,
                 'notes' => $payload['notes'] ?? null,
             ]);
 
             foreach ($payload['breakdowns'] as $breakdown) {
                 PaymentBreakdown::create([
                     'paymentId' => $payment->id,
+                    'memberId' => $breakdown['memberId'],
                     'amount' => $breakdown['amount'],
                     'fundsAccountId' => $breakdown['fundsAccountId'],
                     'month' => $breakdown['month'],
@@ -103,6 +124,20 @@ class PaymentController extends BaseApiController
 
         if (!$account) {
             return response()->json(['error' => 'Invalid or inactive funds account'], 400);
+        }
+
+        return null;
+    }
+
+    private function validateMember(string $tenantId, string $memberId): ?JsonResponse
+    {
+        $member = Member::query()
+            ->where('id', $memberId)
+            ->where('tenantId', $tenantId)
+            ->first();
+
+        if (!$member) {
+            return response()->json(['error' => 'Invalid member'], 400);
         }
 
         return null;

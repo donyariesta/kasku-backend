@@ -8,8 +8,10 @@ final class PaymentCode
 
     public const DONATION = 2;
 
+    public const COLLECTIVE_PAYMENT = 3;
+
     public static function isValid(int $code): bool
     {
-        return in_array($code, [self::MONTHLY_PAYMENT, self::DONATION], true);
+        return in_array($code, [self::MONTHLY_PAYMENT, self::DONATION, self::COLLECTIVE_PAYMENT], true);
     }
 }

@@ -16,6 +16,7 @@ class PaymentBreakdown extends Model
 
     protected $fillable = [
         'paymentId',
+        'memberId',
         'amount',
         'fundsAccountId',
         'month',
@@ -30,6 +31,11 @@ class PaymentBreakdown extends Model
     public function payment(): BelongsTo
     {
         return $this->belongsTo(Payment::class, 'paymentId');
+    }
+
+    public function member(): BelongsTo
+    {
+        return $this->belongsTo(Member::class, 'memberId');
     }
 
     public function fundsAccount(): BelongsTo

@@ -114,6 +114,7 @@ class DepositDistributionService
 
                     PaymentBreakdown::create([
                         'paymentId' => $breakdown->paymentId,
+                        'memberId' => $breakdown->memberId ?? $breakdown->payment?->memberId,
                         'amount' => $share,
                         'fundsAccountId' => $account->id,
                         'month' => $breakdown->month,
