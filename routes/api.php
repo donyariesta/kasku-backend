@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ExpenseController;
+use App\Http\Controllers\Api\FinancialSummaryController;
 use App\Http\Controllers\Api\FundsAccountController;
 use App\Http\Controllers\Api\FundsTransferController;
 use App\Http\Controllers\Api\GroupController;
@@ -38,6 +39,8 @@ Route::middleware('api.auth')->group(function (): void {
     Route::delete('members/{member}', [MemberController::class, 'destroy']);
 
     Route::get('iuran', [IuranController::class, 'index']);
+
+    Route::get('reports/financial-summary', [FinancialSummaryController::class, 'index']);
 
     Route::get('payments', [PaymentController::class, 'index']);
     Route::post('payments', [PaymentController::class, 'store']);

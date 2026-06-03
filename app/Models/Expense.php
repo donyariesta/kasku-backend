@@ -27,6 +27,7 @@ class Expense extends Model
 
     protected $casts = [
         'date' => 'datetime',
+        'amount' => 'float',
     ];
 
     public function fundsAccount(): BelongsTo
