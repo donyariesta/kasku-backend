@@ -19,6 +19,7 @@ class FundsAccount extends Model
 
     protected $fillable = [
         'tenantId',
+        'groupId',
         'name',
         'active',
         'monthlyAmount',
@@ -46,6 +47,20 @@ class FundsAccount extends Model
     public function tenant(): BelongsTo
     {
         return $this->belongsTo(Tenant::class, 'tenantId');
+    }
+
+    public function group(): BelongsTo
+    {
+        return $this->belongsTo(Group::class, 'groupId');
+    }
+
+    public function appliesToGroup(?string $groupId): bool
+    {
+        if ($this->groupId === null) {
+            return true;
+        }
+
+        return $groupId !== null && $this->groupId === $groupId;
     }
 
     public function monthlyTargets(): HasMany

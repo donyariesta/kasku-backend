@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Models\FundsAccount;
 use App\Models\Member;
 use App\Models\Payment;
-use App\Models\PaymentBreakdown;
 use App\Support\PaymentCode;
 use App\Support\Roles;
 use Illuminate\Database\QueryException;
@@ -19,10 +18,48 @@ class PaymentController extends BaseApiController
     {
         $tenantId = $this->resolveTenantId($request);
         $query = Payment::query()
-            ->with(['member', 'breakdowns.fundsAccount'])
+            ->with(['member', 'breakdowns.fundsAccount', 'breakdowns.member'])
             ->orderByDesc('date');
+
         if ($tenantId) {
             $query->where('tenantId', $tenantId);
+        }
+
+        if ($request->filled('memberId')) {
+            $memberId = $request->query('memberId');
+            $query->where(function ($q) use ($memberId): void {
+                $q->where('memberId', $memberId)
+                    ->orWhereHas('breakdowns', fn ($b) => $b->where('memberId', $memberId));
+            });
+        }
+
+        if ($request->filled('fundsAccountId')) {
+            $fundsAccountId = $request->query('fundsAccountId');
+            $query->whereHas(
+                'breakdowns',
+                fn ($b) => $b->where('fundsAccountId', $fundsAccountId)
+            );
+        }
+
+        if ($request->filled('groupId')) {
+            $groupId = $request->query('groupId');
+            $query->whereHas(
+                'breakdowns',
+                fn ($b) => $b->whereHas('member', fn ($m) => $m->where('groupId', $groupId))
+            );
+        }
+
+        if ($request->filled('year')) {
+            $year = (int) $request->query('year');
+            if ($request->filled('month')) {
+                $month = (int) $request->query('month');
+                $query->whereHas(
+                    'breakdowns',
+                    fn ($b) => $b->where('month', $month)->where('year', $year)
+                );
+            } else {
+                $query->whereHas('breakdowns', fn ($b) => $b->where('year', $year));
+            }
         }
 
         return response()->json($query->get());

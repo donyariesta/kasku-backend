@@ -13,6 +13,7 @@ class PaymentBreakdown extends Model
 
     protected $table = 'PaymentBreakdown';
     public $timestamps = false;
+    public static $snakeAttributes = false;
 
     protected $fillable = [
         'paymentId',

@@ -67,8 +67,8 @@ class DepositDistributionService
             ->whereHas('payment', fn ($q) => $q
                 ->where('tenantId', $depositAccount->tenantId)
                 ->where('status', 'paid')
-                ->where('code', PaymentCode::MONTHLY_PAYMENT))
-            ->with('payment')
+                ->whereIn('code', [PaymentCode::MONTHLY_PAYMENT, PaymentCode::COLLECTIVE_PAYMENT]))
+            ->with(['payment', 'member'])
             ->get();
 
         $distributed = [];
@@ -76,9 +76,14 @@ class DepositDistributionService
         foreach ($eligibleBreakdowns as $breakdown) {
             $month = (int) $breakdown->month;
             $year = (int) $breakdown->year;
+            $memberGroupId = $breakdown->member?->groupId;
 
-            $amounts = $this->monthlyTargetService->amountsForPeriod($targetAccounts, $month, $year);
-            $accountsWithTargets = $targetAccounts->filter(
+            $applicableAccounts = $targetAccounts->filter(
+                fn (FundsAccount $account) => $account->appliesToGroup($memberGroupId)
+            );
+
+            $amounts = $this->monthlyTargetService->amountsForPeriod($applicableAccounts, $month, $year);
+            $accountsWithTargets = $applicableAccounts->filter(
                 fn (FundsAccount $a) => ($amounts[$a->id] ?? 0) > 0
             )->values();
 

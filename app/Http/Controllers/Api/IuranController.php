@@ -78,6 +78,7 @@ class IuranController extends BaseApiController
 
             return [
                 'memberId' => $member->id,
+                'groupId' => $member->groupId,
                 'name' => $member->name,
                 'address' => $member->houseNumber,
                 'monthlyPaymentsStatus' => $monthlyPaymentsStatus,
