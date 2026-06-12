@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\TenantController;
 use App\Http\Controllers\Api\TypeController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\WhitelistedController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function (): void {
@@ -37,6 +38,11 @@ Route::middleware('api.auth')->group(function (): void {
     Route::post('members', [MemberController::class, 'store']);
     Route::put('members/{member}', [MemberController::class, 'update']);
     Route::delete('members/{member}', [MemberController::class, 'destroy']);
+
+    Route::get('whitelisted', [WhitelistedController::class, 'index']);
+    Route::post('whitelisted', [WhitelistedController::class, 'store']);
+    Route::put('whitelisted/{whitelisted}', [WhitelistedController::class, 'update']);
+    Route::delete('whitelisted/{whitelisted}', [WhitelistedController::class, 'destroy']);
 
     Route::get('iuran', [IuranController::class, 'index']);
 
