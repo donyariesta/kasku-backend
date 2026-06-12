@@ -376,20 +376,23 @@ class PublicReportController extends Controller
             return $payment->notes ?: 'Donasi / sponsor';
         }
 
-        if ((int) $payment->code === PaymentCode::COLLECTIVE_PAYMENT) {
-            return $payment->notes ?: 'Pembayaran kolektif';
-        }
-
         $periods = $breakdowns
-            ->map(fn (PaymentBreakdown $breakdown) => sprintf('%02d/%d', (int) $breakdown->month, (int) $breakdown->year))
+            ->map(fn (PaymentBreakdown $breakdown) =>
+                Carbon::createFromDate(
+                    (int) $breakdown->year,
+                    (int) $breakdown->month,
+                    1
+                )->format('M Y')
+            )
             ->unique()
-            ->values();
+            ->values()
+            ->implode(', ');
 
-        if ($periods->count() === 1) {
-            return 'Iuran ' . $periods->first();
+        if ((int) $payment->code === PaymentCode::COLLECTIVE_PAYMENT) {
+            return ($payment->notes ?: 'Pembayaran kolektif') . ': ' . $periods;
         }
 
-        return sprintf('Iuran %d periode', $periods->count());
+        return 'Iuran ' . $periods;
     }
 
     private function memberIuranPayload(Tenant $tenant, Member $member, int $year): array
