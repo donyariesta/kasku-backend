@@ -10,12 +10,19 @@ use App\Http\Controllers\Api\IuranController;
 use App\Http\Controllers\Api\JobMonitorController;
 use App\Http\Controllers\Api\MemberController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\PublicReportController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\TenantController;
 use App\Http\Controllers\Api\TypeController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\WhitelistedController;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('public/reports/{tenantSlug}')->group(function (): void {
+    Route::get('/', [PublicReportController::class, 'show']);
+    Route::post('member-iuran', [PublicReportController::class, 'memberIuran']);
+    Route::put('member-pin', [PublicReportController::class, 'updateMemberPin']);
+});
 
 Route::prefix('auth')->group(function (): void {
     Route::post('login', [AuthController::class, 'login']);

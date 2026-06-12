@@ -23,6 +23,7 @@ class Member extends Model
         'tenantId',
         'userId',
         'groupId',
+        'memberPinHash',
     ];
 
     public function group(): BelongsTo
