@@ -388,8 +388,14 @@ class PublicReportController extends Controller
             ->values()
             ->implode(', ');
 
+        $memberCount = $breakdowns
+            ->map(fn (PaymentBreakdown $breakdown) => $breakdown->memberId)
+            ->unique()
+            ->values()
+            ->count();
+
         if ((int) $payment->code === PaymentCode::COLLECTIVE_PAYMENT) {
-            return ($payment->notes ?: 'Pembayaran kolektif') . ': ' . $periods;
+            return ($payment->notes ?: 'Pembayaran kolektif') . ' [' . $memberCount . ' KK]: ' . $periods;
         }
 
         return 'Iuran ' . $periods;
