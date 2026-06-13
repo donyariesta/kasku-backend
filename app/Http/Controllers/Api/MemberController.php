@@ -16,9 +16,15 @@ class MemberController extends BaseApiController
     public function index(Request $request): JsonResponse
     {
         $tenantId = $this->resolveTenantId($request);
-        $query = Member::query()->with('group')->orderBy('name');
+        $query = Member::query()
+            ->select('Member.*')
+            ->join('Group', 'Group.id', '=', 'Member.groupId')
+            ->with('Group')
+            ->orderBy('Group.name')
+            ->orderBy('Member.houseNumber');
+
         if ($tenantId) {
-            $query->where('tenantId', $tenantId);
+            $query->where('Member.tenantId', $tenantId);
         }
 
         return response()->json($query->get());
