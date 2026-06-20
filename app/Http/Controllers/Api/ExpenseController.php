@@ -14,7 +14,7 @@ class ExpenseController extends BaseApiController
     public function index(Request $request): JsonResponse
     {
         $tenantId = $this->resolveTenantId($request);
-        $query = Expense::query()->with('fundsAccount')->orderByDesc('date');
+        $query = Expense::query()->with('fundsAccount')->with('member')->orderByDesc('date');
         if ($tenantId) {
             $query->where('tenantId', $tenantId);
         }
@@ -39,7 +39,9 @@ class ExpenseController extends BaseApiController
             'description' => 'nullable|string',
             'amount' => 'required|numeric',
             'fundsAccountId' => 'required|uuid',
+            'memberId' => 'nullable|uuid',
             'date' => 'nullable|date',
+            'status' => 'nullable|string',
         ]);
 
         if ($error = $this->validateFundsAccount($tenantId, $payload['fundsAccountId'])) {
@@ -51,6 +53,7 @@ class ExpenseController extends BaseApiController
             'date' => $payload['date'] ?? now(),
             'tenantId' => $tenantId,
             'treasurerId' => $request->user()->id,
+            'status' => $payload['status'] ?? 'paid',
         ])->load('fundsAccount'));
     }
 

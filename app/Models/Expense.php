@@ -20,18 +20,26 @@ class Expense extends Model
         'description',
         'amount',
         'date',
+        'status',
         'tenantId',
         'fundsAccountId',
         'treasurerId',
+        'memberId',
     ];
 
     protected $casts = [
         'date' => 'datetime',
         'amount' => 'float',
+        'status' => 'string',
     ];
 
     public function fundsAccount(): BelongsTo
     {
         return $this->belongsTo(FundsAccount::class, 'fundsAccountId');
+    }
+
+    public function member(): BelongsTo
+    {
+        return $this->belongsTo(Member::class, 'memberId');
     }
 }

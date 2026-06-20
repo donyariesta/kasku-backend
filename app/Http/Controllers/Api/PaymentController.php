@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Models\FundsAccount;
 use App\Models\Member;
 use App\Models\Payment;
+use App\Models\PaymentBreakdown;
 use App\Support\PaymentCode;
 use App\Support\Roles;
 use Illuminate\Database\QueryException;
