@@ -61,6 +61,7 @@ Route::middleware('api.auth')->group(function (): void {
 
     Route::get('expenses', [ExpenseController::class, 'index']);
     Route::post('expenses', [ExpenseController::class, 'store']);
+    Route::put('expenses/{expense}', [ExpenseController::class, 'update']);
     Route::delete('expenses/{expense}', [ExpenseController::class, 'destroy']);
 
     Route::get('users', [UserController::class, 'index']);

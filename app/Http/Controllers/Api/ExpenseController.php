@@ -57,6 +57,24 @@ class ExpenseController extends BaseApiController
         ])->load('fundsAccount'));
     }
 
+    public function update(Request $request, string $expense): JsonResponse
+    {
+        if ($forbidden = $this->ensureRole($request, [Roles::SUPER_ADMIN, Roles::TENANT_ADMIN])) {
+            return $forbidden;
+        }
+
+        $query = Expense::query()->where('id', $expense);
+        if ($request->user()?->role !== Roles::SUPER_ADMIN) {
+            $query->where('tenantId', $request->user()?->tenantId);
+        }
+
+        $record = $query->firstOrFail();
+        $record->fill($request->only(['status']));
+        $record->save();
+
+        return response()->json($record);
+    }
+
     private function validateFundsAccount(string $tenantId, string $fundsAccountId): ?JsonResponse
     {
         $account = FundsAccount::query()
