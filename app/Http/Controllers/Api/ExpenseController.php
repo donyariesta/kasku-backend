@@ -2,24 +2,23 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Models\Expense;
+use App\Repositories\ExpenseRepository;
 use App\Models\FundsAccount;
+use App\Models\Expense;
+use App\Models\ExpenseSourceOfFunds;
 use App\Support\Roles;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ExpenseController extends BaseApiController
 {
     public function index(Request $request): JsonResponse
     {
+        $repository = new ExpenseRepository();
         $tenantId = $this->resolveTenantId($request);
-        $query = Expense::query()->with('fundsAccount')->with('member')->orderByDesc('date');
-        if ($tenantId) {
-            $query->where('tenantId', $tenantId);
-        }
-
-        return response()->json($query->get());
+        return response()->json($repository->getExpenses(['tenantId' => $tenantId]));
     }
 
     public function store(Request $request): JsonResponse
@@ -35,7 +34,7 @@ class ExpenseController extends BaseApiController
 
         $payload = $request->validate([
             'title' => 'required|string',
-            'category' => 'required|string',
+            'typeId' => 'required|uuid',
             'description' => 'nullable|string',
             'amount' => 'required|numeric',
             'fundsAccountId' => 'required|uuid',
@@ -48,13 +47,29 @@ class ExpenseController extends BaseApiController
             return $error;
         }
 
-        return response()->json(Expense::create([
-            ...$payload,
-            'date' => $payload['date'] ?? now(),
-            'tenantId' => $tenantId,
-            'treasurerId' => $request->user()->id,
-            'status' => $payload['status'] ?? 'paid',
-        ])->load('fundsAccount'));
+        $expense = DB::transaction(function () use ($payload, $tenantId, $request) {
+            $expense = Expense::create([
+                'title' => $payload['title'],
+                'typeId' => $payload['typeId'],
+                'description' => $payload['description'],
+                'amount' => $payload['amount'],
+                'memberId' => $payload['memberId'],
+                'date' => $payload['date'] ?? now(),
+                'tenantId' => $tenantId,
+                'treasurerId' => $request->user()->id,
+                'status' => $payload['status'] ?? 'paid',
+            ]);
+
+            ExpenseSourceOfFunds::create([
+                'expenseId' => $expense->id,
+                'amount' => $payload['amount'],
+                'fundsAccountId' => $payload['fundsAccountId'],
+            ]);
+
+            return $expense;
+        });
+
+        return response()->json($expense);
     }
 
     public function update(Request $request, string $expense): JsonResponse

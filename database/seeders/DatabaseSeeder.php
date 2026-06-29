@@ -50,6 +50,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         $this->call(FundsAccountSeeder::class);
+        $this->call(TypeSeeder::class);
 
         $expenseTypes = [
             ['type' => 'maintenance', 'description' => 'Expenses type maintenance'],

@@ -5,9 +5,15 @@ namespace App\Http\Controllers\Api;
 use App\Models\FundsAccount;
 use App\Models\Member;
 use App\Models\Payment;
+use App\Models\Expense;
+use App\Models\ExpenseSourceOfFunds;
 use App\Models\PaymentBreakdown;
+use App\Repositories\TypeRepository;
+use App\Repositories\GroupRepository;
 use App\Support\PaymentCode;
 use App\Support\Roles;
+use App\Support\TypeCode;
+use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -80,6 +86,7 @@ class PaymentController extends BaseApiController
         $payload = $request->validate([
             'memberId' => 'required|uuid',
             'amount' => 'required|numeric|min:0',
+            'incentiveAmount' => 'nullable|numeric|min:0',
             'date' => 'nullable|date',
             'status' => 'nullable|string',
             'code' => 'nullable|integer|in:1,2,3',
@@ -122,11 +129,13 @@ class PaymentController extends BaseApiController
             return $error;
         }
 
-        $payment = DB::transaction(function () use ($payload, $tenantId, $request, $code) {
+        $paymentDate = $payload['date'] ?? now();
+
+        $payment = DB::transaction(function () use ($payload, $tenantId, $request, $code, $paymentDate) {
             $payment = Payment::create([
                 'memberId' => $payload['memberId'],
                 'amount' => $payload['amount'],
-                'date' => $payload['date'] ?? now(),
+                'date' => $paymentDate,
                 'tenantId' => $tenantId,
                 'treasurerId' => $request->user()->id,
                 'status' => $payload['status'] ?? 'paid',
@@ -134,7 +143,10 @@ class PaymentController extends BaseApiController
                 'notes' => $payload['notes'] ?? null,
             ]);
 
+            $fundSpread = [];
             foreach ($payload['breakdowns'] as $breakdown) {
+                $keyPeriod = $breakdown['year'] .'-'. $breakdown['month'];
+                $fundSpread[$breakdown['fundsAccountId']] = ($fundSpread[$breakdown['fundsAccountId']] ?? 0) + $breakdown['amount'];
                 PaymentBreakdown::create([
                     'paymentId' => $payment->id,
                     'memberId' => $breakdown['memberId'],
@@ -146,10 +158,68 @@ class PaymentController extends BaseApiController
                 ]);
             }
 
+            $spreadedIncentiveAmount = $payload['incentiveAmount'] ?? 0;
+            if ($spreadedIncentiveAmount > 0) {
+                $groupRepository = new GroupRepository();
+                $groupNames = $groupRepository->getGroupNameByMemberIds(collect($payload['breakdowns'])->pluck('memberId')->unique())->implode(', ');
+
+                $typeRepository = new TypeRepository();
+                $description = collect($payload['breakdowns'])
+                    ->groupBy('month', 'year')
+                    ->map(function($br) {
+                        $brf = $br->first();
+                        return Carbon::create($brf['year'], $brf['month'], 1)->startOfDay()->format('M Y') .
+                            ' - ' . collect($br)->pluck('memberId')->unique()->count() . ' KK';
+                    })
+                    ->implode(', ');
+
+                $expense = Expense::create([
+                    'title' => 'Apresiasi Setoran Blok ' . $groupNames,
+                    'typeId' => $typeRepository->getSystemTypeId($tenantId, TypeCode::EXPENSE_COLLECTION_INCENTIVE),
+                    'description' => 'Peyetoran: ' . $description,
+                    'amount' => $payload['incentiveAmount'],
+                    'memberId' => $payload['memberId'],
+                    'date' => $paymentDate,
+                    'status' => 'paid',
+                    'treasurerId' => $request->user()->id,
+                    'tenantId' => $tenantId,
+                ]);
+
+                $this->spreadIncentiveAmount($fundSpread, $payload['incentiveAmount']);
+                foreach ($fundSpread as $fundsAccountId => $amount) {
+                    ExpenseSourceOfFunds::create([
+                        'expenseId' => $expense->id,
+                        'amount' => $amount,
+                        'fundsAccountId' => $fundsAccountId,
+                    ]);
+                }
+            }
+
             return $payment;
         });
 
         return response()->json($payment->load(['member', 'breakdowns.fundsAccount']));
+    }
+
+    private function spreadIncentiveAmount(array &$fundSpread, int $incentiveAmount): void
+    {
+        $outstandingAmount = $incentiveAmount;
+        $incentiveAmount = $incentiveAmount / 100;
+        $totalAmount = array_sum($fundSpread);
+        $spreadedIncentiveAmount = [];
+        foreach ($fundSpread as $fundsAccountId => $amount) {
+            $percentage = $amount / $totalAmount;
+            $spreadAmount = round($incentiveAmount * $percentage, mode: PHP_ROUND_HALF_DOWN) * 100;
+            $outstandingAmount -= $spreadAmount;
+            $spreadedIncentiveAmount[$fundsAccountId] = $spreadAmount;
+        }
+
+        if ($outstandingAmount > 0) {
+            $firstAccountId = array_key_first($fundSpread);
+            $spreadedIncentiveAmount[$firstAccountId] += $outstandingAmount;
+        }
+
+        $fundSpread = $spreadedIncentiveAmount;
     }
 
     private function validateFundsAccount(string $tenantId, string $fundsAccountId): ?JsonResponse

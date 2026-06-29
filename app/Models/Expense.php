@@ -6,23 +6,22 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Expense extends Model
 {
     use HasFactory, HasUuids;
-
     protected $table = 'Expense';
     public $timestamps = false;
 
     protected $fillable = [
         'title',
-        'category',
+        'typeId',
         'description',
         'amount',
         'date',
         'status',
         'tenantId',
-        'fundsAccountId',
         'treasurerId',
         'memberId',
     ];
@@ -33,13 +32,18 @@ class Expense extends Model
         'status' => 'string',
     ];
 
-    public function fundsAccount(): BelongsTo
+    public function expenseSourceOfFunds(): HasMany
     {
-        return $this->belongsTo(FundsAccount::class, 'fundsAccountId');
+        return $this->hasMany(ExpenseSourceOfFunds::class, 'expenseId')->with('fundsAccount');
     }
 
     public function member(): BelongsTo
     {
         return $this->belongsTo(Member::class, 'memberId');
+    }
+
+    public function type(): BelongsTo
+    {
+        return $this->belongsTo(Type::class, 'typeId');
     }
 }

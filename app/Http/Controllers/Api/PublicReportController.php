@@ -3,13 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Expense;
-use App\Models\FundsAccount;
-use App\Models\FundsTransfer;
-use App\Models\Group;
+use App\Repositories\ExpenseRepository;
+use App\Repositories\FundsAccountRepository;
+use App\Repositories\PaymentRepository;
 use App\Models\Member;
 use App\Models\Payment;
-use App\Models\PaymentBreakdown;
 use App\Models\Tenant;
 use App\Support\PaymentCode;
 use Carbon\Carbon;
@@ -21,10 +19,6 @@ class PublicReportController extends Controller
 {
     public function show(Request $request, string $tenantSlug): JsonResponse
     {
-        $tenant = $this->findTenant($tenantSlug);
-        if (!$tenant) {
-            return response()->json(['error' => 'Report not found'], 404);
-        }
 
         $payload = $request->validate([
             'month' => 'required|integer|min:1|max:12',
@@ -33,6 +27,11 @@ class PublicReportController extends Controller
 
         $month = (int) $payload['month'];
         $year = (int) $payload['year'];
+
+        $tenant = $this->findTenant($tenantSlug);
+        if (!$tenant) {
+            return response()->json(['error' => 'Report not found'], 404);
+        }
 
         return response()->json([
             'tenant' => [
@@ -129,92 +128,22 @@ class PublicReportController extends Controller
 
     private function financialSummary(string $tenantId, int $month, int $year): array
     {
-        $monthStart = Carbon::create($year, $month, 1)->startOfDay();
-        $monthEnd = Carbon::create($year, $month, 1)->endOfMonth()->endOfDay();
+        $monthStart = Carbon::create($year, $month, 1, 0, 0, 0, 'Asia/Jakarta')->startOfDay();
+        $lastMonthEnd = clone $monthStart;
+        $monthEnd = Carbon::create($year, $month, 1, 0, 0, 0, 'Asia/Jakarta')->endOfMonth()->endOfDay();
 
-        $members = Member::query()
-            ->where('tenantId', $tenantId)
-            ->with('group')
-            ->get()
-            ->keyBy('id');
+        $fundsAccountRepository = new FundsAccountRepository();
+        $openingBalances = $fundsAccountRepository->getBalanceUntil($tenantId, $lastMonthEnd->subDay(), null);
+        $closingBalances = $fundsAccountRepository->getBalanceUntil($tenantId, $monthEnd, null);
 
-        $groups = Group::query()
-            ->where('tenantId', $tenantId)
-            ->orderBy('name')
-            ->get();
-
-        $fundsAccounts = FundsAccount::query()
-            ->where('tenantId', $tenantId)
-            ->where('active', true)
-            ->orderBy('name')
-            ->get()
-            ->filter(fn (FundsAccount $a) => !$a->isDeposit());
-
-        $payments = Payment::query()
-            ->where('tenantId', $tenantId)
-            ->where('status', 'paid')
-            ->with('breakdowns')
-            ->get();
-
-        $expenses = Expense::query()->where('tenantId', $tenantId)->get();
-        $transfers = FundsTransfer::query()->where('tenantId', $tenantId)->get();
-
-        $monthPayments = $payments->filter(
-            fn (Payment $p) => Carbon::parse($p->date)->between($monthStart, $monthEnd)
-        );
-
-        $totalIncome = 0.0;
-        $incomeByGroup = [];
-        foreach ($groups as $group) {
-            $incomeByGroup[$group->id] = [
-                'groupId' => $group->id,
-                'groupName' => $group->name,
-                'amount' => 0.0,
-            ];
-        }
-        $incomeByGroup['__none__'] = [
-            'groupId' => null,
-            'groupName' => 'Tanpa Grup',
-            'amount' => 0.0,
-        ];
-
-        foreach ($monthPayments as $payment) {
-            foreach ($payment->breakdowns as $breakdown) {
-                $amount = (float) $breakdown->amount;
-                $totalIncome += $amount;
-                $member = $members->get($breakdown->memberId ?? $payment->memberId);
-                $groupKey = $member?->groupId ?? '__none__';
-                if (!isset($incomeByGroup[$groupKey])) {
-                    $incomeByGroup[$groupKey] = [
-                        'groupId' => $member?->groupId,
-                        'groupName' => $member?->group?->name ?? 'Tanpa Grup',
-                        'amount' => 0.0,
-                    ];
-                }
-                $incomeByGroup[$groupKey]['amount'] += $amount;
-            }
-        }
-
-        $monthExpenses = $expenses->filter(
-            fn (Expense $e) => Carbon::parse($e->date)->between($monthStart, $monthEnd)
-        );
-
-        $openingBalances = [];
-        $closingBalances = [];
-        foreach ($fundsAccounts as $account) {
-            $openingBalances[] = [
-                'fundsAccountId' => $account->id,
-                'fundsAccountName' => $account->name,
-                'amount' => round($this->accountBalanceUntil($account->id, $payments, $expenses, $transfers, $monthStart, false), 2),
-            ];
-            $closingBalances[] = [
-                'fundsAccountId' => $account->id,
-                'fundsAccountName' => $account->name,
-                'amount' => round($this->accountBalanceUntil($account->id, $payments, $expenses, $transfers, $monthEnd, true), 2),
-            ];
-        }
-
+        $expenseRepository = new ExpenseRepository();
+        $monthExpenses = $expenseRepository->getExpensesTypeOnMonth($tenantId, $year, $month);
         $totalExpense = round($monthExpenses->sum('amount'), 2);
+
+        $paymentRepository = new PaymentRepository();
+        $monthlyIncomePerGroup = $paymentRepository->getMonthlyIncomePerGroup($tenantId, $year, $month);
+        $totalDeposit = $monthlyIncomePerGroup->map(fn ($income) => ($income['details']['deposit'] ?? 0))->sum();
+        $totalIncome = round(collect($monthlyIncomePerGroup)->sum('amount'), 2) - $totalDeposit;
 
         return [
             'period' => [
@@ -225,29 +154,19 @@ class PublicReportController extends Controller
                 'label' => $monthStart->locale('id')->translatedFormat('F Y'),
             ],
             'summary' => [
-                'totalIncome' => round($totalIncome, 2),
+                'totalIncome' => $totalIncome,
                 'totalExpense' => $totalExpense,
+                'totalDeposit' => $totalDeposit,
+                'totalDepositExpensed' => round(collect($monthlyIncomePerGroup)->filter(fn($expense) => $expense['groupId'] == '000')->sum('amount'), 2),
                 'monthlyDifference' => round($totalIncome - $totalExpense, 2),
-                'openingBalance' => round(collect($openingBalances)->sum('amount'), 2),
-                'closingBalance' => round(collect($closingBalances)->sum('amount'), 2),
+                'openingBalance' => round(collect($openingBalances)->filter(fn ($account) => !$account['isDeposit'])->sum('balance'), 2),
+                'depositBalanceOpening' => round(collect($openingBalances)->filter(fn ($account) => $account['isDeposit'])->sum('balance'), 2),
+                'depositBalance' => round(collect($closingBalances)->filter(fn ($account) => $account['isDeposit'])->sum('balance'), 2),
+                'closingBalance' => round(collect($closingBalances)->filter(fn ($account) => !$account['isDeposit'])->sum('balance'), 2),
             ],
-            'incomeByGroup' => collect($incomeByGroup)
-                ->filter(fn (array $row) => $row['amount'] > 0)
-                ->sortBy('groupName')
-                ->values()
-                ->map(fn (array $row) => [
-                    'groupId' => $row['groupId'],
-                    'groupName' => $row['groupName'],
-                    'amount' => round($row['amount'], 2),
-                ])
-                ->all(),
-            'expensesByCategory' => $monthExpenses
-                ->groupBy(fn (Expense $e) => $e->category ?: 'Lainnya')
-                ->map(fn ($items, string $category) => [
-                    'category' => $category,
-                    'amount' => round($items->sum('amount'), 2),
-                ])
-                ->sortBy('category')
+            'incomeByGroup' => $monthlyIncomePerGroup->all(),
+            'expensesByType' => $monthExpenses
+                ->sortBy('type')
                 ->values()
                 ->all(),
             'openingBalancesByAccount' => $openingBalances,
@@ -260,63 +179,14 @@ class PublicReportController extends Controller
         $monthStart = Carbon::create($year, $month, 1)->startOfDay();
         $monthEnd = Carbon::create($year, $month, 1)->endOfMonth()->endOfDay();
 
-        $payments = Payment::query()
-            ->where('tenantId', $tenantId)
-            ->where('status', 'paid')
-            ->with(['member.group', 'breakdowns.fundsAccount', 'breakdowns.member.group'])
-            ->get();
-        $expenses = Expense::query()
-            ->where('tenantId', $tenantId)
-            ->with('fundsAccount')
-            ->get();
-        $transfers = FundsTransfer::query()->where('tenantId', $tenantId)->get();
-        $accounts = FundsAccount::query()->where('tenantId', $tenantId)->get();
-        $depositAccountIds = $accounts
-            ->filter(fn (FundsAccount $account) => $account->isDeposit())
-            ->pluck('id')
-            ->all();
-        $operationalAccounts = $accounts->filter(fn (FundsAccount $account) => !$account->isDeposit());
+        $expenseRepository = new ExpenseRepository();
+        $expenses = $expenseRepository->getExpenses(['tenantId' => $tenantId, 'betweenDate' => [$monthStart, $monthEnd]]);
 
-        $lastMonthBalance = round($operationalAccounts->sum(
-            fn (FundsAccount $account) => $this->accountBalanceUntil($account->id, $payments, $expenses, $transfers, $monthStart, false)
-        ), 2);
+        $paymentRepository = new PaymentRepository();
+        $payments = $paymentRepository->getPayments(['tenantId' => $tenantId, 'betweenDate' => [$monthStart, $monthEnd]]);
 
-        $incomeRows = [];
-        $depositRows = [];
-        foreach ($payments->filter(fn (Payment $p) => Carbon::parse($p->date)->between($monthStart, $monthEnd)) as $payment) {
-            $depositBreakdowns = $payment->breakdowns->filter(
-                fn (PaymentBreakdown $breakdown) => in_array($breakdown->fundsAccountId, $depositAccountIds, true)
-            );
-            $incomeBreakdowns = $payment->breakdowns->reject(
-                fn (PaymentBreakdown $breakdown) => in_array($breakdown->fundsAccountId, $depositAccountIds, true)
-            );
-
-            if ($incomeBreakdowns->isNotEmpty()) {
-                $incomeRows[] = $this->paymentTransactionRow($payment, $incomeBreakdowns, 'income');
-            }
-
-            if ($depositBreakdowns->isNotEmpty()) {
-                $depositRows[] = $this->paymentTransactionRow($payment, $depositBreakdowns, 'deposit');
-            }
-        }
-
-        $expenseRows = $expenses
-            ->filter(fn (Expense $e) => Carbon::parse($e->date)->between($monthStart, $monthEnd))
-            ->sortBy('date')
-            ->values()
-            ->map(fn (Expense $expense) => [
-                'id' => $expense->id,
-                'date' => Carbon::parse($expense->date)->toDateString(),
-                'description' => $expense->title,
-                'category' => $expense->category,
-                'fundsAccountName' => $expense->fundsAccount?->name,
-                'amount' => round((float) $expense->amount, 2),
-            ])
-            ->all();
-
-        $totalIncome = round(collect($incomeRows)->sum('amount'), 2);
-        $totalExpenses = round(collect($expenseRows)->sum('amount'), 2);
-        $totalDeposit = round(collect($depositRows)->sum('amount'), 2);
+        $depositRows = $payments->filter(fn($payment) => $payment['fundsAccountName'] == 'Deposit');
+        $incomeRows = $payments->filter(fn($payment) => $payment['fundsAccountName'] != 'Deposit');
 
         return [
             'period' => [
@@ -324,81 +194,10 @@ class PublicReportController extends Controller
                 'year' => $year,
                 'label' => $monthStart->locale('id')->translatedFormat('F Y'),
             ],
-            'summary' => [
-                'lastMonthBalance' => $lastMonthBalance,
-                'totalIncome' => $totalIncome,
-                'totalExpenses' => $totalExpenses,
-                'totalDeposit' => $totalDeposit,
-                'endBalanceExcludingDeposit' => round($lastMonthBalance + $totalIncome - $totalExpenses, 2),
-            ],
             'incomeTransactions' => collect($incomeRows)->sortBy('date')->values()->all(),
-            'expenseTransactions' => $expenseRows,
+            'expenseTransactions' => collect($expenses)->map(fn($expense) => [...$expense, 'fundsAccountName' => $expense['sourceOfFundsCompacted']]),
             'depositTransactions' => collect($depositRows)->sortBy('date')->values()->all(),
         ];
-    }
-
-    private function paymentTransactionRow(Payment $payment, $breakdowns, string $type): array
-    {
-        return [
-            'id' => $type . '-' . $payment->id,
-            'date' => Carbon::parse($payment->date)->toDateString(),
-            'description' => $this->paymentDescription($payment, $breakdowns),
-            'memberName' => $payment->member?->name,
-            'houseNumber' => $payment->member?->houseNumber,
-            'groupName' => $payment->member?->group?->name ?? 'Tanpa Grup',
-            'fundsAccountName' => $this->fundsAccountLabel($breakdowns),
-            'amount' => round((float) $breakdowns->sum('amount'), 2),
-        ];
-    }
-
-    private function fundsAccountLabel($breakdowns): string
-    {
-        $names = $breakdowns
-            ->map(fn (PaymentBreakdown $breakdown) => $breakdown->fundsAccount?->name)
-            ->filter()
-            ->unique()
-            ->values();
-
-        if ($names->count() === 0) {
-            return '-';
-        }
-
-        if ($names->count() === 1) {
-            return (string) $names->first();
-        }
-
-        return 'Semua pos';
-    }
-
-    private function paymentDescription(Payment $payment, $breakdowns): string
-    {
-        if ((int) $payment->code === PaymentCode::DONATION) {
-            return $payment->notes ?: 'Donasi / sponsor';
-        }
-
-        $periods = $breakdowns
-            ->map(fn (PaymentBreakdown $breakdown) =>
-                Carbon::createFromDate(
-                    (int) $breakdown->year,
-                    (int) $breakdown->month,
-                    1
-                )->format('M Y')
-            )
-            ->unique()
-            ->values()
-            ->implode(', ');
-
-        $memberCount = $breakdowns
-            ->map(fn (PaymentBreakdown $breakdown) => $breakdown->memberId)
-            ->unique()
-            ->values()
-            ->count();
-
-        if ((int) $payment->code === PaymentCode::COLLECTIVE_PAYMENT) {
-            return ($payment->notes ?: 'Pembayaran kolektif') . ' [' . $memberCount . ' KK]: ' . $periods;
-        }
-
-        return 'Iuran ' . $periods;
     }
 
     private function memberIuranPayload(Tenant $tenant, Member $member, int $year): array
@@ -442,66 +241,5 @@ class PublicReportController extends Controller
             'year' => $year,
             'monthlyPaymentsStatus' => $monthlyPaymentsStatus,
         ];
-    }
-
-    private function accountBalanceUntil(
-        string $accountId,
-        $payments,
-        $expenses,
-        $transfers,
-        Carbon $cutoff,
-        bool $inclusive
-    ): float {
-        $income = 0.0;
-        foreach ($payments as $payment) {
-            if ($payment->status !== 'paid') {
-                continue;
-            }
-            $paymentDate = Carbon::parse($payment->date);
-            if ($inclusive ? $paymentDate->gt($cutoff) : $paymentDate->gte($cutoff)) {
-                continue;
-            }
-
-            foreach ($payment->breakdowns as $breakdown) {
-                if ($breakdown->fundsAccountId === $accountId) {
-                    $income += (float) $breakdown->amount;
-                }
-            }
-        }
-
-        $spent = $expenses
-            ->filter(function (Expense $expense) use ($cutoff, $inclusive, $accountId) {
-                if ($expense->fundsAccountId !== $accountId) {
-                    return false;
-                }
-                $date = Carbon::parse($expense->date);
-
-                return $inclusive ? $date->lte($cutoff) : $date->lt($cutoff);
-            })
-            ->sum('amount');
-
-        $transferIn = $transfers
-            ->filter(function (FundsTransfer $transfer) use ($cutoff, $inclusive, $accountId) {
-                if ($transfer->toFundsAccountId !== $accountId) {
-                    return false;
-                }
-                $date = Carbon::parse($transfer->date);
-
-                return $inclusive ? $date->lte($cutoff) : $date->lt($cutoff);
-            })
-            ->sum('amount');
-
-        $transferOut = $transfers
-            ->filter(function (FundsTransfer $transfer) use ($cutoff, $inclusive, $accountId) {
-                if ($transfer->fromFundsAccountId !== $accountId) {
-                    return false;
-                }
-                $date = Carbon::parse($transfer->date);
-
-                return $inclusive ? $date->lte($cutoff) : $date->lt($cutoff);
-            })
-            ->sum('amount');
-
-        return $income + $transferIn - $spent - $transferOut;
     }
 }
