@@ -116,6 +116,7 @@ class PaymentRepository
             ->selectRaw('SUM(pb.amount) as amount')
             ->selectRaw('COUNT(DISTINCT pb.memberId) AS numberOfMember')
             ->groupBy('g.id')
+            ->groupBy('g.name')
             ->groupBy('pb.year')
             ->groupBy('pb.month')
             ->groupBy('p.date')
