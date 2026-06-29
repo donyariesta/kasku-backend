@@ -26,7 +26,7 @@ class PaymentRepository
         return Payment::query()
             ->from('Payment as p')
             ->join('PaymentBreakdown as pb', 'p.id', '=', 'pb.paymentId')
-            ->join('member as m', 'm.id', '=', 'p.memberId')
+            ->join('Member as m', 'm.id', '=', 'p.memberId')
             ->when($filter['tenantId'], function ($query) use ($filter) {
                 $query->where('p.tenantId', $filter['tenantId']);
             })
