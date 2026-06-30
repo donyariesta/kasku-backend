@@ -43,6 +43,7 @@ class FundsAccountRepository
                 return [
                     'isDeposit' => $account->isDeposit(),
                     'asOfDate' => $date,
+                    'active' => $account->active,
                     'fundsAccountId' => $accountId,
                     'fundsAccountName' => $account->name,
                     'expenseAmount' => $expenseAmount,

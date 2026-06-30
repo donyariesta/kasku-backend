@@ -9,6 +9,7 @@ use App\Repositories\PaymentRepository;
 use App\Models\Member;
 use App\Models\Payment;
 use App\Models\Tenant;
+use App\Models\PaymentBreakdown;
 use App\Support\PaymentCode;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -19,7 +20,6 @@ class PublicReportController extends Controller
 {
     public function show(Request $request, string $tenantSlug): JsonResponse
     {
-
         $payload = $request->validate([
             'month' => 'required|integer|min:1|max:12',
             'year' => 'required|integer|min:2000|max:2100',

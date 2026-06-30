@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Expense;
+use App\Models\ExpenseSourceOfFunds;
 use App\Models\FundsAccount;
 use App\Models\FundsTransfer;
 use App\Models\PaymentBreakdown;
@@ -16,7 +17,7 @@ class FundsAccountBalanceService
             ->whereHas('payment', fn ($q) => $q->where('status', 'paid'))
             ->sum('amount');
 
-        $spent = Expense::query()
+        $spent = ExpenseSourceOfFunds::query()
             ->where('fundsAccountId', $account->id)
             ->sum('amount');
 

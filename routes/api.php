@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\JobMonitorController;
 use App\Http\Controllers\Api\MemberController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\PublicReportController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\TenantController;
 use App\Http\Controllers\Api\TypeController;
@@ -87,6 +88,8 @@ Route::middleware('api.auth')->group(function (): void {
     Route::get('settings', [SettingController::class, 'index']);
     Route::get('settings/{fieldId}', [SettingController::class, 'show']);
     Route::post('settings/upsert', [SettingController::class, 'upsert']);
+
+    Route::get('balances', [ReportController::class, 'getBalances']);
 
     Route::prefix('admin/jobs')->group(function (): void {
         Route::get('/', [JobMonitorController::class, 'overview']);
