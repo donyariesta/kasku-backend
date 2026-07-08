@@ -25,4 +25,18 @@ class ReportController extends BaseApiController
 
         return response()->json($closingBalances);
     }
+
+    public function getKPI(Request $request): JsonResponse
+    {
+        $payload = $request->validate([
+            'year' => 'required|integer',
+            'month' => 'nullable|integer|min:0|max:12',
+        ]);
+
+        $tenantId = $this->resolveTenantId($request);
+        $paymentRepository = new PaymentRepository();
+        $kpi = $paymentRepository->getKPI($tenantId, $payload['year'], $payload['month']?? 0);
+
+        return response()->json($kpi);
+    }
 }

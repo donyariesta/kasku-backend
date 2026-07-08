@@ -6,11 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Repositories\ExpenseRepository;
 use App\Repositories\FundsAccountRepository;
 use App\Repositories\PaymentRepository;
+use App\Repositories\SettingRepository;
 use App\Models\Member;
 use App\Models\Payment;
 use App\Models\Tenant;
 use App\Models\PaymentBreakdown;
 use App\Support\PaymentCode;
+use App\Support\Constants;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -202,6 +204,9 @@ class PublicReportController extends Controller
 
     private function memberIuranPayload(Tenant $tenant, Member $member, int $year): array
     {
+        $settingRepository = new \App\Repositories\SettingRepository();
+        $firstPaymentDate = $settingRepository->getSetting($tenant->id, Constants::SETTING_PAYMENT_COLLECTION_STARTDATE);
+
         $payments = Payment::query()
             ->where('tenantId', $tenant->id)
             ->whereIn('code', [PaymentCode::MONTHLY_PAYMENT, PaymentCode::COLLECTIVE_PAYMENT])
@@ -212,13 +217,27 @@ class PublicReportController extends Controller
 
         $monthlyPaymentsStatus = [];
         for ($month = 1; $month <= 12; $month++) {
+            $monthEnd = Carbon::create($year, $month, 1)->endOfMonth()->endOfDay();
+
             $breakdowns = $payments->flatMap->breakdowns->filter(
                 fn (PaymentBreakdown $b) =>
                     $b->memberId === $member->id
                     && (int) $b->month === $month
                     && (int) $b->year === $year
             );
+
+             if ($breakdowns->isEmpty() && $firstPaymentDate && $monthEnd->lt(Carbon::parse($firstPaymentDate))) {
+                $monthlyPaymentsStatus[] = [
+                    'month' => $month,
+                    'year' => $year,
+                    'status' => 'not_due',
+                    'paidAmount' => 0,
+                ];
+                continue;
+            }
+
             $monthlyPaymentsStatus[] = [
+                'firstPaymentDate' => $firstPaymentDate,
                 'month' => $month,
                 'year' => $year,
                 'status' => $breakdowns->isNotEmpty() ? 'paid' : 'unpaid',

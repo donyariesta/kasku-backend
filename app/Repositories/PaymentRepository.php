@@ -13,9 +13,138 @@ use App\Models\Group;
 use Carbon\Carbon;
 use App\Repositories\FundsAccountRepository;
 use App\Support\PaymentCode;
+use Illuminate\Support\Facades\DB;
 
 class PaymentRepository
 {
+    public function getKPI($tenantId, $year, $month = 0)
+    {
+        if (empty($month)) {
+            $month = 0;
+        }
+
+        return DB::select("
+WITH RECURSIVE months AS (
+    SELECT 1 AS month
+    UNION ALL
+    SELECT month + 1
+    FROM months
+    WHERE month < 12
+)
+, FilterValues AS (
+    SELECT
+        ? tenantId
+        , ? year
+        , ? month
+)
+, GroupTarget AS (
+    SELECT g.id
+        , g.name
+    FROM `Group` g
+        JOIN FilterValues fv ON fv.tenantId = g.tenantId
+)
+, TargetMonths AS (
+    SELECT fv.year
+        , m.month
+        , LAST_DAY(CONCAT(fv.year, '-', LPAD(m.month, m.month + 1, '0'), '-01')) lastDate
+    FROM months m
+        JOIN FilterValues fv ON fv.month = 0 OR fv.month = m.month
+)
+, Payments AS (
+    SELECT pb.memberId
+        , pb.year
+        , pb.month
+        , sum(pb.amount) amount
+    FROM PaymentBreakdown pb
+        JOIN Payment p ON p.id = pb.paymentId
+        JOIN FilterValues fv ON (
+            fv.year = pb.year
+            AND (fv.month = 0 OR fv.month = pb.month)
+            AND fv.tenantId = p.tenantId
+        )
+    GROUP BY memberId
+        , pb.year
+        , pb.month
+)
+, PaymentSummary AS (
+    SELECT g.id as groupId
+        , p.year
+        , p.month
+        , count(m.id) numberOfPayor
+        , sum(p.amount) amount
+    FROM payments as p
+        JOIN Member m ON m.id = p.memberId
+        JOIN GroupTarget g ON g.id = m.groupId
+    GROUP BY g.id
+        , p.year
+        , p.month
+)
+, GroupMember AS (
+    SELECT m.groupId
+        , count(m.id) numberOfMember
+    FROM Member m
+        JOIN FilterValues fv ON fv.tenantId = m.tenantId
+    WHERE m.status = ?
+    GROUP BY m.groupId
+)
+, WhitelistedSummary AS (
+    SELECT YEAR(tm.lastDate) year
+        , tm.month
+        , m.groupId
+        , count(wl.memberId) numberOfWaitlisted
+    FROM TargetMonths tm
+        JOIN Whitelisted wl ON (
+            tm.lastDate BETWEEN wl.dateFrom AND wl.dateTo
+        )
+        JOIN Member m ON m.id = wl.memberId
+    GROUP BY YEAR(tm.lastDate)
+        , tm.month
+        , m.groupId
+)
+, GroupDetails AS (
+    SELECT g.id
+        , g.name
+        , COALESCE(gm.numberOfMember, 0) numberOfMember
+    FROM GroupTarget g
+        LEFT JOIN GroupMember gm ON gm.groupId = g.id
+)
+, RawSummary AS (
+    SELECT g.id
+        , g.name
+        , YEAR(tm.lastDate) year
+        , tm.month
+        , g.numberOfMember
+        , COALESCE(ws.numberOfWaitlisted, 0) numberOfWaitlisted
+        , g.numberOfMember - COALESCE(ws.numberOfWaitlisted, 0) effectiveNumberOfMember
+        , FLOOR((g.numberOfMember - COALESCE(ws.numberOfWaitlisted, 0)) * 0.8) target
+        , COALESCE(ps.numberOfPayor, 0) numberOfPayor
+        , COALESCE(ps.amount, 0) amount
+    FROM GroupDetails as g
+        CROSS JOIN TargetMonths tm
+        LEFT JOIN WhitelistedSummary ws ON (
+            ws.groupId = g.id
+            AND YEAR(tm.lastDate) = ws.year
+            AND tm.month = ws.month
+        )
+        LEFT JOIN PaymentSummary ps ON (
+            ps.groupId = g.id
+            AND ps.year = YEAR(tm.lastDate)
+            AND ps.month = tm.month
+        )
+    ORDER BY g.name, YEAR(tm.lastDate), tm.month
+)
+SELECT rs.*
+    , ROUND((numberOfPayor / effectiveNumberOfMember) * 100, 2) Overall
+    , ROUND((LEAST(numberOfPayor, target) / target) * 100, 2) TargetAchievement
+FROM RawSummary as rs
+", [
+    $tenantId,
+    $year,
+    $month,
+    'active'
+]);
+    }
+
     public function getPayments($filter)
     {
         $fundsAccountRepository = new FundsAccountRepository();

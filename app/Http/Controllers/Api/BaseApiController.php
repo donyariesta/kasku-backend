@@ -28,4 +28,16 @@ class BaseApiController extends Controller
 
         return $user?->tenantId;
     }
+
+    protected function getSetting(Request $request, string $fieldId): ?string
+    {
+        $tenantId = $this->resolveTenantId($request);
+        if (!$tenantId) {
+            return null;
+        }
+
+        $settingRepository = new \App\Repositories\SettingRepository();
+
+        return $settingRepository->getSetting($tenantId, $fieldId);
+    }
 }

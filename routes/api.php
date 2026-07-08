@@ -90,6 +90,8 @@ Route::middleware('api.auth')->group(function (): void {
     Route::post('settings/upsert', [SettingController::class, 'upsert']);
 
     Route::get('balances', [ReportController::class, 'getBalances']);
+    Route::get('report/kpi', [ReportController::class, 'getKPI']);
+    Route::get('report/overdue', [ReportController::class, 'getOverdue']);
 
     Route::prefix('admin/jobs')->group(function (): void {
         Route::get('/', [JobMonitorController::class, 'overview']);
