@@ -39,4 +39,44 @@ class ReportController extends BaseApiController
 
         return response()->json($kpi);
     }
+
+    public function getOverdue(Request $request): JsonResponse
+    {
+        $payload = $request->validate([
+            'groupId' => 'nullable|uuid',
+        ]);
+
+        $tenantId = $this->resolveTenantId($request);
+        $paymentRepository = new PaymentRepository();
+        $overdue = $paymentRepository->getOverdue($tenantId, $payload['groupId'] ?? null);
+        $overdue = Collect($overdue)->map(function ($item) {
+            $periods = collect(json_decode($item->overduePeriods, true))->map(function ($period) {
+                return Carbon::parse($period)->format('M Y');
+            })->implode(', ');
+
+            return array_merge(Collect($item)->toArray(), ['overduePeriods' => $periods]);
+        });
+
+        return response()->json($overdue);
+    }
+
+    public function getPaymentSettled(Request $request): JsonResponse
+    {
+        $payload = $request->validate([
+            'groupId' => 'nullable|uuid',
+            'year' => 'required|integer',
+            'month' => 'nullable|integer|min:0|max:12',
+        ]);
+
+        $tenantId = $this->resolveTenantId($request);
+        $paymentRepository = new PaymentRepository();
+        $paymentSettled = $paymentRepository->getPaymentSettled(
+            $tenantId,
+            $payload['groupId'] ?? null,
+            $payload['year'],
+            $payload['month'] ?? 0
+        );
+
+        return response()->json($paymentSettled);
+    }
 }

@@ -12,11 +12,140 @@ use App\Models\FundsAccount;
 use App\Models\Group;
 use Carbon\Carbon;
 use App\Repositories\FundsAccountRepository;
+use App\Repositories\SettingRepository;
 use App\Support\PaymentCode;
+use App\Support\Constants;
 use Illuminate\Support\Facades\DB;
 
 class PaymentRepository
 {
+    public function getOverdue($tenantId, $groupId = null)
+    {
+        $settingRepository = new SettingRepository();
+        $firstPaymentDate = $settingRepository->getSetting($tenantId, Constants::SETTING_PAYMENT_COLLECTION_STARTDATE);
+
+        $filterGroup = '';
+        if (!empty($groupId)) {
+            $filterGroup = "AND g.id = '$groupId'";
+        }
+
+        return DB::select("
+WITH RECURSIVE months AS (
+    SELECT DATE_FORMAT(?, '%Y-%m-01') AS month_date
+
+    UNION ALL
+    SELECT DATE_ADD(month_date, INTERVAL 1 MONTH)
+    FROM months
+    WHERE month_date < DATE_FORMAT(CURDATE(), '%Y-%m-01')
+)
+, FilterValues AS (
+    SELECT ? tenantId
+)
+, GroupTarget AS (
+    SELECT g.id
+        , g.name
+    FROM `Group` g
+        JOIN FilterValues fv ON fv.tenantId = g.tenantId
+    WHERE 1=1
+        $filterGroup
+)
+, TargetMonths AS (
+    SELECT
+        YEAR(month_date) AS year
+        , MONTH(month_date) AS month
+        , LAST_DAY(month_date) lastDate
+    FROM months
+    WHERE LAST_DAY(month_date) < LAST_DAY(CURDATE())
+)
+, Payments AS (
+    SELECT pb.memberId
+        , pb.year
+        , pb.month
+    FROM PaymentBreakdown pb
+        JOIN Payment p ON p.id = pb.paymentId
+        JOIN FilterValues fv ON (fv.tenantId = p.tenantId)
+        JOIN TargetMonths tm ON (tm.year = pb.year AND tm.month = pb.month)
+    GROUP BY memberId, pb.year, pb.month
+)
+, Members AS (
+    SELECT m.*
+        , g.name as groupName
+    FROM Member m
+        JOIN GroupTarget g ON g.id = m.groupId
+    WHERE m.status = ?
+)
+SELECT m.id
+    , m.name
+    , m.houseNumber
+    , m.groupName
+    , count(m.id) numberOfOverduePeriods
+    , JSON_ARRAYAGG(lastDate) overduePeriods
+FROM Members m
+    CROSS JOIN TargetMonths tm
+    LEFT JOIN Payments p ON (
+        p.memberId = m.id
+        AND p.year = tm.year
+        AND p.month = tm.month
+    )
+WHERE p.memberId IS NULL
+GROUP BY m.id
+    , m.name
+    , m.houseNumber
+    , m.groupName
+ORDER BY m.groupName
+    , m.houseNumber", [
+            $firstPaymentDate->format('Y-m-d'),
+            $tenantId,
+            'active'
+        ]);
+    }
+
+    public function getPaymentSettled($tenantId, $groupId, $year, $month)
+    {
+        return Collect(DB::select("
+WITH Members AS (
+    SELECT * FROM Member
+    WHERE tenantId = ?
+        AND groupId = ?
+)
+, Payments AS (
+    SELECT m.id
+        , pb.year
+        , pb.month
+        , sum(pb.amount) amount
+    FROM PaymentBreakdown pb
+        JOIN Members  m ON m.id = pb.memberId
+    WHERE pb.year = ?
+        AND pb.month = ?
+    GROUP BY m.id
+        , pb.year
+        , pb.month
+)
+SELECT m.id
+    , m.name
+    , m.houseNumber
+    , m.status
+    , p.amount
+    , p.year
+    , p.month
+FROM Members m
+    LEFT JOIN Payments p ON p.id = m.id
+",
+        [
+            $tenantId,
+            $groupId,
+            $year,
+            $month
+        ]))->map(function ($item) {
+            $item->periods = '';
+            if (!empty($item->amount)) {
+                $item->periods = Carbon::createFromDate((int) $item->year, (int) $item->month, 1)->format('M Y');
+            }
+
+            return $item;
+        });
+    }
+
     public function getKPI($tenantId, $year, $month = 0)
     {
         if (empty($month)) {
