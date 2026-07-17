@@ -35,11 +35,16 @@ class PublicReportController extends Controller
             return response()->json(['error' => 'Report not found'], 404);
         }
 
+        $settingRepository = new SettingRepository();
+
         return response()->json([
             'tenant' => [
                 'id' => $tenant->id,
                 'name' => $tenant->name,
                 'slug' => $tenant->slug,
+            ],
+            'settings' => [
+                'tenantType' => $settingRepository->getSetting($tenant->id, Constants::SETTING_TENANT_TYPE) ?? Constants::TENANT_TYPE_NEIGHBORHOOD,
             ],
             'financialSummary' => $this->financialSummary($tenant->id, $month, $year),
             'transactions' => $this->monthlyTransactions($tenant->id, $month, $year),

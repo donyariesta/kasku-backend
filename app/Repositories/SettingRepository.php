@@ -26,6 +26,7 @@ class SettingRepository
     private function getValueColumn($fieldId)
     {
         $mapping = [
+            Constants::SETTING_TENANT_TYPE => 'stringValue',
             Constants::SETTING_PAYMENT_COLLECTION_STARTDATE => 'dateValue',
         ];
 
