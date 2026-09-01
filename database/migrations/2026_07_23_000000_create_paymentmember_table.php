@@ -47,7 +47,7 @@ return new class extends Migration
                 JOIN Payment p ON p.id = pb.paymentId
                 JOIN Member m ON m.id = pb.memberId
                 JOIN `Group` g ON g.id = m.groupId
-            GROUP BY tenantId, PaymentID, month, year, groupId, g.name
+            GROUP BY tenantId, PaymentID, month, year, p.amount, groupId, g.name
         ");
 
         DB::statement("
