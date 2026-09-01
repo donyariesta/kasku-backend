@@ -47,7 +47,7 @@ return new class extends Migration
                 JOIN Payment p ON p.id = pb.paymentId
                 JOIN Member m ON m.id = pb.memberId
                 JOIN `Group` g ON g.id = m.groupId
-            GROUP BY PaymentID, month, year, groupId, g.name
+            GROUP BY tenantId, PaymentID, month, year, groupId, g.name
         ");
 
         DB::statement("
@@ -57,7 +57,7 @@ return new class extends Migration
                 , CONCAT('[', GROUP_CONCAT(JSON_OBJECT('id', pb.FundsAccountID, 'amount', pb.Amount)), ']') AS funds
             FROM PaymentBreakdown pb
                 JOIN Payment p ON p.id = pb.paymentId
-            GROUP BY pb.paymentId, pb.memberId, pb.year, pb.month
+            GROUP BY tenantId, pb.paymentId, pb.memberId, pb.year, pb.month
         ");
 
         DB::statement("
