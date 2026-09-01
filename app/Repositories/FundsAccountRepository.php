@@ -88,14 +88,15 @@ class FundsAccountRepository
         return PaymentBreakdown::query()
             ->from('PaymentBreakdown as pb')
             ->join('Payment as p', 'p.id', '=', 'pb.paymentId')
+            ->join('PaymentAux as pa', 'p.id', '=', 'pa.paymentId')
             ->where('p.tenantId', $tenantId)
             ->where('p.date', '<=', $date)
             ->when($fundsAccountId, function ($query) use ($fundsAccountId) {
                 $query->where('pb.fundsAccountId', $fundsAccountId);
             })
-            ->select('pb.fundsAccountId', 'pb.year', 'pb.month')
+            ->select('pb.fundsAccountId', 'pa.year', 'pa.month')
             ->selectRaw('SUM(pb.amount) as amount')
-            ->groupBy('pb.fundsAccountId', 'pb.year', 'pb.month')
+            ->groupBy('pb.fundsAccountId', 'pa.year', 'pa.month')
             ->get()->map(function($payment) use ($date, $depositFundsAccountId) {
                 if ($payment->year > $date->year) {
                     $fundsAccountId = $depositFundsAccountId;
@@ -148,5 +149,13 @@ class FundsAccountRepository
             ->selectRaw('SUM(ft.amount) as amount')
             ->groupBy('ft.fromFundsAccountId')
             ->get()->pluck('amount', 'fundsAccountId');
+    }
+
+    public function getDefaultFundsAccount($tenantId)
+    {
+        return FundsAccount::query()
+            ->where('tenantId', $tenantId)
+            ->where('isDefault', true)
+            ->first();
     }
 }

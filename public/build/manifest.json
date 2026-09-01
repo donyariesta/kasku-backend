@@ -12,12 +12,12 @@
     "src": "node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2"
   },
   "src/main.tsx": {
-    "file": "assets/main-Cl2jeRAf.js",
+    "file": "assets/main-Cmd6xL30.js",
     "name": "main",
     "src": "src/main.tsx",
     "isEntry": true,
     "css": [
-      "assets/main-DaTb8egK.css"
+      "assets/main-Dkg9YYxJ.css"
     ],
     "assets": [
       "assets/geist-cyrillic-wght-normal-CHSlOQsW.woff2",

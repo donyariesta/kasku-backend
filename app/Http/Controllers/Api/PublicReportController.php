@@ -11,6 +11,7 @@ use App\Models\Member;
 use App\Models\Payment;
 use App\Models\Tenant;
 use App\Models\PaymentBreakdown;
+use App\Models\PaymentMember;
 use App\Support\PaymentCode;
 use App\Support\Constants;
 use Carbon\Carbon;
@@ -36,6 +37,11 @@ class PublicReportController extends Controller
         }
 
         $settingRepository = new SettingRepository();
+        $tenantType = $settingRepository->getSetting($tenant->id, Constants::SETTING_TENANT_TYPE) ?? Constants::TENANT_TYPE_NEIGHBORHOOD;
+
+        if ($tenantType === Constants::TENANT_TYPE_EVENT) {
+           $month = $year = null;
+        }
 
         return response()->json([
             'tenant' => [
@@ -44,7 +50,7 @@ class PublicReportController extends Controller
                 'slug' => $tenant->slug,
             ],
             'settings' => [
-                'tenantType' => $settingRepository->getSetting($tenant->id, Constants::SETTING_TENANT_TYPE) ?? Constants::TENANT_TYPE_NEIGHBORHOOD,
+                'tenantType' => $tenantType,
             ],
             'financialSummary' => $this->financialSummary($tenant->id, $month, $year),
             'transactions' => $this->monthlyTransactions($tenant->id, $month, $year),
@@ -133,11 +139,15 @@ class PublicReportController extends Controller
         return hash_equals('123456', $pin);
     }
 
-    private function financialSummary(string $tenantId, int $month, int $year): array
+    private function financialSummary(string $tenantId, $month, $year): array
     {
-        $monthStart = Carbon::create($year, $month, 1, 0, 0, 0, 'Asia/Jakarta')->startOfDay();
+        $monthStart = Carbon::create(2025, 01, 1, 0, 0, 0, 'Asia/Jakarta')->startOfDay();
+        $monthEnd = Carbon::create(now()->year, now()->month, 1, 0, 0, 0, 'Asia/Jakarta')->endOfMonth()->endOfDay();
+        if ($month && $year) {
+            $monthStart = Carbon::create($year, $month, 1, 0, 0, 0, 'Asia/Jakarta')->startOfDay();
+            $monthEnd = Carbon::create($year, $month, 1, 0, 0, 0, 'Asia/Jakarta')->endOfMonth()->endOfDay();
+        }
         $lastMonthEnd = clone $monthStart;
-        $monthEnd = Carbon::create($year, $month, 1, 0, 0, 0, 'Asia/Jakarta')->endOfMonth()->endOfDay();
 
         $fundsAccountRepository = new FundsAccountRepository();
         $openingBalances = $fundsAccountRepository->getBalanceUntil($tenantId, $lastMonthEnd->subDay(), null);
@@ -181,10 +191,14 @@ class PublicReportController extends Controller
         ];
     }
 
-    private function monthlyTransactions(string $tenantId, int $month, int $year): array
+    private function monthlyTransactions(string $tenantId, $month, $year): array
     {
-        $monthStart = Carbon::create($year, $month, 1)->startOfDay();
-        $monthEnd = Carbon::create($year, $month, 1)->endOfMonth()->endOfDay();
+        $monthStart = Carbon::create(2025, 01, 1, 0, 0, 0, 'Asia/Jakarta')->startOfDay();
+        $monthEnd = Carbon::create(now()->year, now()->month, 1, 0, 0, 0, 'Asia/Jakarta')->endOfMonth()->endOfDay();
+        if ($month && $year) {
+            $monthStart = Carbon::create($year, $month, 1, 0, 0, 0, 'Asia/Jakarta')->startOfDay();
+            $monthEnd = Carbon::create($year, $month, 1, 0, 0, 0, 'Asia/Jakarta')->endOfMonth()->endOfDay();
+        }
 
         $expenseRepository = new ExpenseRepository();
         $expenses = $expenseRepository->getExpenses(['tenantId' => $tenantId, 'betweenDate' => [$monthStart, $monthEnd]]);
@@ -212,26 +226,21 @@ class PublicReportController extends Controller
         $settingRepository = new \App\Repositories\SettingRepository();
         $firstPaymentDate = $settingRepository->getSetting($tenant->id, Constants::SETTING_PAYMENT_COLLECTION_STARTDATE);
 
-        $payments = Payment::query()
+        $payments = PaymentMember::query()
             ->where('tenantId', $tenant->id)
-            ->whereIn('code', [PaymentCode::MONTHLY_PAYMENT, PaymentCode::COLLECTIVE_PAYMENT])
-            ->where('status', 'paid')
-            ->with('breakdowns')
-            ->whereHas('breakdowns', fn ($q) => $q->where('memberId', $member->id)->where('year', $year))
+            ->where('memberId', $member->id)
+            ->where('year', $year)
             ->get();
 
         $monthlyPaymentsStatus = [];
         for ($month = 1; $month <= 12; $month++) {
             $monthEnd = Carbon::create($year, $month, 1)->endOfMonth()->endOfDay();
 
-            $breakdowns = $payments->flatMap->breakdowns->filter(
-                fn (PaymentBreakdown $b) =>
-                    $b->memberId === $member->id
-                    && (int) $b->month === $month
-                    && (int) $b->year === $year
+            $monthlyPayment = $payments->filter(
+                fn (PaymentMember $payment) => (int) $payment->month === $month
             );
 
-             if ($breakdowns->isEmpty() && $firstPaymentDate && $monthEnd->lt(Carbon::parse($firstPaymentDate))) {
+             if ($monthlyPayment->isEmpty() && $firstPaymentDate && $monthEnd->lt(Carbon::parse($firstPaymentDate))) {
                 $monthlyPaymentsStatus[] = [
                     'month' => $month,
                     'year' => $year,
@@ -245,8 +254,8 @@ class PublicReportController extends Controller
                 'firstPaymentDate' => $firstPaymentDate,
                 'month' => $month,
                 'year' => $year,
-                'status' => $breakdowns->isNotEmpty() ? 'paid' : 'unpaid',
-                'paidAmount' => round($breakdowns->sum('amount'), 2),
+                'status' => $monthlyPayment->isNotEmpty() ? 'paid' : 'unpaid',
+                'paidAmount' => $monthlyPayment->isNotEmpty() ? $monthlyPayment->first()['amount'] : 0,
             ];
         }
 

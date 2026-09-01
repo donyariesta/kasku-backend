@@ -7,6 +7,8 @@ use App\Models\ExpenseSourceOfFunds;
 use App\Models\PaymentBreakdown;
 use App\Models\Expense;
 use App\Models\Payment;
+use App\Models\PaymentAux;
+use App\Models\PaymentMember;
 use App\Models\FundsTransfer;
 use App\Models\FundsAccount;
 use App\Models\Group;
@@ -16,6 +18,7 @@ use App\Repositories\SettingRepository;
 use App\Support\PaymentCode;
 use App\Support\Constants;
 use Illuminate\Support\Facades\DB;
+use App\Support\Roles;
 
 class PaymentRepository
 {
@@ -58,14 +61,12 @@ WITH RECURSIVE months AS (
     WHERE LAST_DAY(month_date) < LAST_DAY(CURDATE())
 )
 , Payments AS (
-    SELECT pb.memberId
-        , pb.year
-        , pb.month
-    FROM PaymentBreakdown pb
-        JOIN Payment p ON p.id = pb.paymentId
-        JOIN FilterValues fv ON (fv.tenantId = p.tenantId)
-        JOIN TargetMonths tm ON (tm.year = pb.year AND tm.month = pb.month)
-    GROUP BY memberId, pb.year, pb.month
+    SELECT pm.memberId
+        , pm.year
+        , pm.month
+    FROM PaymentMember pm
+        JOIN FilterValues fv ON (fv.tenantId = pm.tenantId)
+        JOIN TargetMonths tm ON (tm.year = pm.year AND tm.month = pm.month)
 )
 , Members AS (
     SELECT m.*
@@ -78,8 +79,8 @@ SELECT m.id
     , m.name
     , m.houseNumber
     , m.groupName
-    , count(m.id) numberOfOverduePeriods
-    , JSON_ARRAYAGG(lastDate) overduePeriods
+    -- , m.id numberOfOverduePeriods
+    , lastDate overduePeriods
 FROM Members m
     CROSS JOIN TargetMonths tm
     LEFT JOIN Payments p ON (
@@ -88,10 +89,6 @@ FROM Members m
         AND p.month = tm.month
     )
 WHERE p.memberId IS NULL
-GROUP BY m.id
-    , m.name
-    , m.houseNumber
-    , m.groupName
 ORDER BY m.groupName
     , m.houseNumber", [
             $firstPaymentDate->format('Y-m-d'),
@@ -110,16 +107,16 @@ WITH Members AS (
 )
 , Payments AS (
     SELECT m.id
-        , pb.year
-        , pb.month
-        , sum(pb.amount) amount
-    FROM PaymentBreakdown pb
-        JOIN Members  m ON m.id = pb.memberId
-    WHERE pb.year = ?
-        AND pb.month = ?
+        , pm.year
+        , pm.month
+        , sum(pm.amount) amount
+    FROM PaymentMember pm
+        JOIN Members m ON m.id = pm.memberId
+    WHERE pm.year = ?
+        AND pm.month = ?
     GROUP BY m.id
-        , pb.year
-        , pb.month
+        , pm.year
+        , pm.month
 )
 SELECT m.id
     , m.name
@@ -179,34 +176,23 @@ WITH RECURSIVE months AS (
     FROM months m
         JOIN FilterValues fv ON fv.month = 0 OR fv.month = m.month
 )
-, Payments AS (
-    SELECT pb.memberId
-        , pb.year
-        , pb.month
-        , sum(pb.amount) amount
-    FROM PaymentBreakdown pb
-        JOIN Payment p ON p.id = pb.paymentId
-        JOIN FilterValues fv ON (
-            fv.year = pb.year
-            AND (fv.month = 0 OR fv.month = pb.month)
-            AND fv.tenantId = p.tenantId
-        )
-    GROUP BY memberId
-        , pb.year
-        , pb.month
-)
 , PaymentSummary AS (
-    SELECT g.id as groupId
-        , p.year
-        , p.month
-        , count(m.id) numberOfPayor
+    SELECT pa.groupId
+        , pa.year
+        , pa.month
+        , sum(pa.totalMember) numberOfPayor
         , sum(p.amount) amount
-    FROM payments as p
-        JOIN Member m ON m.id = p.memberId
-        JOIN GroupTarget g ON g.id = m.groupId
-    GROUP BY g.id
-        , p.year
-        , p.month
+        , sum(pa.incentiveAmount) incentiveAmount
+    FROM Payment p
+        JOIN PaymentAux pa ON pa.paymentId = p.id
+        JOIN FilterValues fv ON (
+            fv.year = pa.year
+            AND (fv.month = 0 OR fv.month = pa.month)
+            AND fv.tenantId = pa.tenantId
+        )
+    GROUP BY pa.groupId
+        , pa.year
+        , pa.month
 )
 , GroupMember AS (
     SELECT m.groupId
@@ -283,6 +269,7 @@ FROM RawSummary as rs
 
         return Payment::query()
             ->from('Payment as p')
+            ->join('PaymentAux as pa', 'p.id', '=', 'pa.paymentId')
             ->join('PaymentBreakdown as pb', 'p.id', '=', 'pb.paymentId')
             ->join('Member as m', 'm.id', '=', 'p.memberId')
             ->when($filter['tenantId'], function ($query) use ($filter) {
@@ -291,7 +278,7 @@ FROM RawSummary as rs
             ->when($filter['betweenDate'], function ($query) use ($filter) {
                 $query->whereBetween('p.date', $filter['betweenDate']);
             })
-            ->select('p.date', 'm.name as memberName', 'm.houseNumber', 'm.groupId', 'pb.fundsAccountId', 'pb.year', 'pb.month', 'pb.amount', 'p.code', 'p.id', 'p.notes', 'pb.memberId as payorId')
+            ->select('p.date', 'm.name as memberName', 'm.houseNumber', 'pa.groupId', 'pb.fundsAccountId', 'pa.year', 'pa.month', 'pb.amount', 'p.code', 'p.id', 'p.notes', 'pa.totalMember')
             ->get()->map(function($payment) use ($fundAccounts, $depositFundsAccountId) {
                 $fundsAccountId = $payment->fundsAccountId;
                 $type = 'income';
@@ -323,10 +310,7 @@ FROM RawSummary as rs
                     ->values()
                     ->implode(', ');
 
-                $memberCount = $payments->map(fn($payment) => $payment['payorId'])
-                    ->unique()
-                    ->values()
-                    ->count();
+                $memberCount = $payments->first()['totalMember'];
 
                 $description = 'Iuran ' . $periods;
                 if ((int) $firstPayment['code'] === PaymentCode::COLLECTIVE_PAYMENT) {
@@ -349,45 +333,66 @@ FROM RawSummary as rs
 
     public function getMonthlyIncomePerGroup($tenantId, $year, $month)
     {
-        $monthStart = Carbon::create($year, $month, 1)->startOfDay();
-        $monthEnd = Carbon::create($year, $month, 1)->endOfMonth()->endOfDay();
+        $monthStart = $monthEnd =null;
+        if (!empty($year) && !empty($month)) {
+            $monthStart = Carbon::create($year, $month, 1)->startOfDay();
+            $monthEnd = Carbon::create($year, $month, 1)->endOfMonth()->endOfDay();
+        }
 
         $fundsAccountRepository = new FundsAccountRepository();
         $depositFundsAccountId = $fundsAccountRepository->getDepositFundsAccountId($tenantId);
 
         return Payment::query()
             ->from('Payment as p')
+            ->join('PaymentAux as pa', 'p.id', '=', 'pa.paymentId')
             ->join('PaymentBreakdown as pb', 'p.id', '=', 'pb.paymentId')
-            ->join('Member as m', 'pb.memberId', '=', 'm.id')
-            ->join('Group as g', 'm.groupId', '=', 'g.id')
+            ->join('Group as g', 'pa.groupId', '=', 'g.id')
             ->where('p.tenantId', $tenantId)
-            ->where(function ($q) use ($monthStart, $monthEnd, $depositFundsAccountId) {
-                $q->whereBetween('p.date', [$monthStart, $monthEnd])
-                    ->orWhere(function($q) use($monthStart, $depositFundsAccountId) {
-                        $q->where('pb.year', $monthStart->year)
-                            ->where('pb.month', $monthStart->month)
-                            ->where('p.date', '<', $monthStart)
-                            ->where('pb.fundsAccountId', '!=', $depositFundsAccountId);
-                    });
+            ->when(!empty($monthStart) && !empty($monthEnd), function ($query) use ($monthStart, $monthEnd, $depositFundsAccountId) {
+                $query->where(function ($q) use ($monthStart, $monthEnd, $depositFundsAccountId) {
+                    $q->whereBetween('p.date', [$monthStart, $monthEnd])
+                        ->orWhere(function($q) use($monthStart, $depositFundsAccountId) {
+                            $q->where('pa.year', $monthStart->year)
+                                ->where('pa.month', $monthStart->month)
+                                ->where('p.date', '<', $monthStart)
+                                ->where('pb.fundsAccountId', '!=', $depositFundsAccountId);
+                        });
+                });
             })
-            ->select('g.id as groupId', 'g.name as groupName', 'pb.year', 'pb.month', 'p.date as paidDate')
+            ->select('g.id as groupId', 'g.name as groupName', 'pa.year', 'pa.month', 'p.date as paidDate', 'p.code')
             ->selectRaw('SUM(pb.amount) as amount')
-            ->selectRaw('COUNT(DISTINCT pb.memberId) AS numberOfMember')
+            ->selectRaw('SUM(pa.totalMember) AS numberOfMember')
             ->groupBy('g.id')
             ->groupBy('g.name')
-            ->groupBy('pb.year')
-            ->groupBy('pb.month')
+            ->groupBy('pa.year')
+            ->groupBy('pa.month')
             ->groupBy('p.date')
+            ->groupBy('p.code')
             ->get()
             ->map(function($payment) use ($monthStart) {
                 $paymentPeriod = Carbon::create($payment->year, $payment->month, 1)->startOfDay();
+                $groupName = 'Blok ' . $payment->groupName;
+                $groupId = $payment->groupId;
 
-                if ($paymentPeriod < $monthStart) {
+                if (empty($monthStart)) {
+                    $groupName = $payment->groupName;
+                    $groupKey = $paymentPeriod->format('M');
+                } else if ($payment->code === PaymentCode::DONATION) {
+                    $groupKey = 'other';
+                    $groupName = 'Pendapatan Lain';
+                    $groupId = '003';
+                } elseif ($paymentPeriod < $monthStart) {
                     $groupKey = 'owe';
+                    $groupName .= ' (Susulan Iuran ' .$paymentPeriod->format('M') . ')';
+                    $groupId .= 'Owe' . $paymentPeriod->format('YM');
                 } elseif ($paymentPeriod > $monthStart) {
                     $groupKey = 'deposit';
+                    $groupName .= ' (Deposit)';
+                    $groupId .= 'DEPO';
                 } elseif ($payment->paidDate < $paymentPeriod) {
                     $groupKey = 'fromdeposit';
+                    $groupName = 'Pencairan Deposit';
+                    $groupId = '000';
                 } else {
                     $groupKey = $paymentPeriod->format('M');
                 }
@@ -395,8 +400,8 @@ FROM RawSummary as rs
                 return [
                     ...$payment->toArray(),
                     'groupKey' => $groupKey,
-                    'groupName' => $groupKey == 'fromdeposit' ? 'Simpanan Deposit' : $payment->groupName,
-                    'groupId' => $groupKey == 'fromdeposit' ? '000' : $payment->groupId,
+                    'groupName' => $groupName,
+                    'groupId' => $groupId,
                 ];
             })
             ->groupBy('groupName')
@@ -407,7 +412,7 @@ FROM RawSummary as rs
                     'amount' => $group->sum('amount'),
                     'details' => $group->groupBy('groupKey')->map(fn ($periodGroup) => $periodGroup->sum('amount')),
                 ];
-            })->values();
+            })->sortBy('groupName')->values();
     }
 
     private function getTransferFromUntil($tenantId, $date, $fundsAccountId = null)
@@ -423,5 +428,107 @@ FROM RawSummary as rs
             ->selectRaw('SUM(ft.amount) as amount')
             ->groupBy('ft.fromFundsAccountId')
             ->get()->pluck('amount', 'fundsAccountId');
+    }
+
+    public function getPaymentMemberRecord($tenantId, $memberId, $year, $month)
+    {
+        return PaymentMember::query()
+            ->where('tenantId', $tenantId)
+            ->where('memberId', $memberId)
+            ->where('year', $year)
+            ->where('month', $month)
+            ->get()->first();
+    }
+
+    public function getPaymentList($filter)
+    {
+        $binds = [
+            $filter['tenantId']
+        ];
+        $where = [
+            'p.tenantId = ?'
+        ];
+
+        if (!empty($filter['year'])) {
+            $where[] = '(CASE WHEN p.code = ? OR p.code = ? THEN pa.year ELSE YEAR(p.date) END) = ?';
+            $binds[] = PaymentCode::MONTHLY_PAYMENT;
+            $binds[] = PaymentCode::COLLECTIVE_PAYMENT;
+            $binds[] = $filter['year'];
+        }
+
+        if (!empty($filter['month'])) {
+            $where[] = '(CASE WHEN p.code = ? OR p.code = ? THEN pa.month ELSE MONTH(p.date) END) = ?';
+            $binds[] = PaymentCode::MONTHLY_PAYMENT;
+            $binds[] = PaymentCode::COLLECTIVE_PAYMENT;
+            $binds[] = $filter['month'];
+        }
+
+        if (!empty($filter['memberId'])) {
+            $where[] = 'pa.memberId = ?';
+            $binds[] = $filter['memberId'];
+        }
+
+        if (!empty($filter['groupId'])) {
+            $where[] = 'pa.groupId = ?';
+            $binds[] = $filter['groupId'];
+        }
+
+        $whereSQL = $where ? ' AND ' . implode(' AND ', $where) : '';
+
+        $sql = <<<SQL
+SELECT p.id
+    , m.name payorName
+    , m.houseNumber
+    , g.name groupName
+    , p.date
+    , p.amount
+    , p.code
+    , pa.month
+    , pa.year
+    , pa.totalMember
+    , pa.amountPerMember
+    , pa.incentiveAmount
+FROM Payment p
+    JOIN Member m ON m.id = p.memberId
+    LEFT JOIN PaymentAux pa ON pa.paymentId = p.id
+    LEFT JOIN `Group` g ON g.id = pa.groupId
+WHERE true
+{$whereSQL}
+GROUP BY p.id
+    , m.name
+    , m.houseNumber
+    , g.name
+    , p.date
+    , p.amount
+    , p.code
+    , pa.month
+    , pa.year
+    , pa.totalMember
+    , pa.amountPerMember
+    , pa.incentiveAmount
+ORDER BY P.date DESC
+SQL;
+
+        return DB::select($sql, $binds);
+    }
+
+    public function delete($user, $paymentId)
+    {
+        DB::transaction(function () use ($user, $paymentId) {
+            $query = Payment::query()->where('id', $paymentId);
+            if ($user->role !== Roles::SUPER_ADMIN) {
+                $query->where('tenantId', $user->tenantId);
+            }
+
+            $payment = $query->first();
+            if (!$payment) {
+                return response()->json(['error' => 'Payment not found.'], 404);
+            }
+
+            PaymentAux::query()->where('paymentId', $paymentId)->delete();
+            PaymentMember::query()->where('paymentId', $paymentId)->delete();
+            PaymentBreakdown::query()->where('paymentId', $paymentId)->delete();
+            $payment->delete();
+        });
     }
 }

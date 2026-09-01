@@ -8,11 +8,17 @@ use App\Models\Payment;
 use App\Models\Expense;
 use App\Models\ExpenseSourceOfFunds;
 use App\Models\PaymentBreakdown;
+use App\Models\PaymentAux;
+use App\Models\PaymentMember;
 use App\Repositories\TypeRepository;
 use App\Repositories\GroupRepository;
+use App\Repositories\FundsAccountRepository;
+use App\Repositories\PaymentRepository;
+use App\Repositories\SettingRepository;
 use App\Support\PaymentCode;
 use App\Support\Roles;
 use App\Support\TypeCode;
+use App\Support\Constants;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -24,52 +30,132 @@ class PaymentController extends BaseApiController
     public function index(Request $request): JsonResponse
     {
         $tenantId = $this->resolveTenantId($request);
-        $query = Payment::query()
-            ->with(['member', 'breakdowns.fundsAccount', 'breakdowns.member'])
-            ->orderByDesc('date');
 
-        if ($tenantId) {
-            $query->where('tenantId', $tenantId);
-        }
+        $paymentRepository = new PaymentRepository();
 
-        if ($request->filled('memberId')) {
-            $memberId = $request->query('memberId');
-            $query->where(function ($q) use ($memberId): void {
-                $q->where('memberId', $memberId)
-                    ->orWhereHas('breakdowns', fn ($b) => $b->where('memberId', $memberId));
-            });
-        }
+        $filter = [
+            'tenantId' => $tenantId,
+        ];
 
         if ($request->filled('fundsAccountId')) {
-            $fundsAccountId = $request->query('fundsAccountId');
-            $query->whereHas(
-                'breakdowns',
-                fn ($b) => $b->where('fundsAccountId', $fundsAccountId)
-            );
-        }
-
-        if ($request->filled('groupId')) {
-            $groupId = $request->query('groupId');
-            $query->whereHas(
-                'breakdowns',
-                fn ($b) => $b->whereHas('member', fn ($m) => $m->where('groupId', $groupId))
-            );
+            $filter['fundsAccountId'] = $request->query('fundsAccountId');
         }
 
         if ($request->filled('year')) {
-            $year = (int) $request->query('year');
-            if ($request->filled('month')) {
-                $month = (int) $request->query('month');
-                $query->whereHas(
-                    'breakdowns',
-                    fn ($b) => $b->where('month', $month)->where('year', $year)
-                );
-            } else {
-                $query->whereHas('breakdowns', fn ($b) => $b->where('year', $year));
-            }
+            $filter['year'] = $request->query('year');
         }
 
-        return response()->json($query->get());
+        if ($request->filled('month')) {
+            $filter['month'] = $request->query('month');
+        }
+
+        if ($request->filled('groupId')) {
+            $filter['groupId'] = $request->query('groupId');
+        }
+
+        if ($request->filled('fundsAccountId')) {
+            $filter['fundsAccountId'] = $request->query('fundsAccountId');
+        }
+
+        $paymentList = collect($paymentRepository->getPaymentList($filter))->map(function ($payment) {
+            $payment->groupName = !empty($payment->groupName) ? $payment->groupName : PaymentCode::getName($payment->code);
+            $payment->year = !empty($payment->year) ? $payment->year : carbon::parse($payment->date)->year;
+            $payment->month = !empty($payment->month) ? $payment->month : carbon::parse($payment->date)->month;
+            return $payment;
+        });
+
+        return response()->json($paymentList);
+    }
+
+    public function getFormData(Request $request): JsonResponse
+    {
+        $tenantId = $this->resolveTenantId($request);
+        $settingRepository = new SettingRepository();
+
+        $members = Member::query()
+            ->where('tenantId', $tenantId)
+            ->where('status', 'active')
+            ->orderBy('name')
+            ->get();
+
+        $fundsAccounts = FundsAccount::query()
+            ->where('tenantId', $tenantId)
+            ->where('active', true)
+            ->orderBy('name')
+            ->get();
+
+        return response()->json([
+            'paymentCodeOptions' => PaymentCode::getOptions(),
+            'members' => $members,
+            'fundsAccounts' => $fundsAccounts,
+            'settings' => [
+                'tenantType' => $settingRepository->getSetting($tenantId, Constants::SETTING_TENANT_TYPE) ?? Constants::TENANT_TYPE_NEIGHBORHOOD,
+            ],
+        ]);
+    }
+
+    public function getEditPayorFormData(Request $request, $paymentId): JsonResponse
+    {
+        $paymentAux = PaymentAux::query()
+            ->where('paymentId', $paymentId)
+            ->first();
+
+        $groupRepository = new \App\Repositories\GroupRepository();
+        $monthlyPayments = $groupRepository->getMonthlyPayments([
+            'tenantId' => $paymentAux->tenantId,
+            'groupId' => $paymentAux->groupId,
+            'year' => $paymentAux->year,
+            'month' => $paymentAux->month,
+        ]);
+
+         return response()->json([
+            'paymentId' => $paymentAux->paymentId,
+            'totalMember' => $paymentAux->totalMember,
+            'amountPerMember' => $paymentAux->amountPerMember,
+            'count' => count($monthlyPayments),
+            'membersBill' => $monthlyPayments,
+         ]);
+    }
+
+    public function updatePaymentPayor(Request $request, $paymentId): JsonResponse
+    {
+        $payload = $request->validate([
+            'selectedMembers' => 'nullable|array',
+        ]);
+
+        $selectedMembers = collect($payload['selectedMembers'])->unique()->values()->all();
+
+        $paymentAux = PaymentAux::query()
+            ->where('paymentId', $paymentId)
+            ->first();
+
+        $existingMemberIds = PaymentMember::query()
+            ->where('paymentId', $paymentAux->paymentId)
+            ->whereIn('memberId', $selectedMembers)
+            ->get()->pluck('memberId')->toArray();
+
+        PaymentMember::query()
+            ->where('paymentId', $paymentAux->paymentId)
+            ->whereNotIn('memberId', $selectedMembers)
+            ->delete();
+
+        foreach ($selectedMembers as $memberId) {
+            if (in_array($memberId, $existingMemberIds)) {
+                continue;
+            }
+
+            PaymentMember::create([
+                'tenantId' => $paymentAux->tenantId,
+                'memberId' => $memberId,
+                'paymentId' => $paymentAux->paymentId,
+                'month' => $paymentAux->month,
+                'year' => $paymentAux->year,
+                'amount' => $paymentAux->amountPerMember,
+                'paymentBreakdown' => [],
+            ]);
+        }
+
+        return response()->json($paymentAux->payment);
     }
 
     public function store(Request $request): JsonResponse
@@ -84,56 +170,43 @@ class PaymentController extends BaseApiController
         }
 
         $payload = $request->validate([
-            'memberId' => 'required|uuid',
-            'amount' => 'required|numeric|min:0',
+            'payerMemberId' => 'required|uuid',
+            'paymentDate' => 'nullable|date',
+            'year' => 'required|numeric|min:0',
+            'month' => 'required|numeric|min:0',
+            'groupId' => 'required|uuid',
+            'checklistIncluded' => 'required|boolean',
             'incentiveAmount' => 'nullable|numeric|min:0',
-            'date' => 'nullable|date',
+            'numberOfPaid' => 'nullable|numeric|min:0',
+            'amount' => 'required|numeric|min:0',
             'status' => 'nullable|string',
-            'code' => 'nullable|integer|in:1,2,3',
+            'code' => 'nullable|integer|in:' . implode(',', array_keys(PaymentCode::getOptions())),
             'notes' => 'nullable|string',
-            'breakdowns' => 'required|array|min:1',
-            'breakdowns.*.memberId' => 'required|uuid',
+            'selectedMembers' => 'nullable|array',
+            'selectedOweMembers' => 'nullable|array',
+            'memberPaymentBreakdown' => 'nullable|array',
+            'memberPaymentBreakdown.*.amount' => 'required|numeric|min:0',
+            'memberPaymentBreakdown.*.fundsAccountId' => 'required|uuid',
+            'breakdowns' => 'nullable|array',
             'breakdowns.*.amount' => 'required|numeric|min:0',
             'breakdowns.*.fundsAccountId' => 'required|uuid',
-            'breakdowns.*.month' => 'required|integer|min:1|max:12',
-            'breakdowns.*.year' => 'required|integer',
             'breakdowns.*.notes' => 'nullable|string',
         ]);
 
-        $code = (int) ($payload['code'] ?? PaymentCode::MONTHLY_PAYMENT);
-
-        foreach ($payload['breakdowns'] as $breakdown) {
-            if (
-                $code !== PaymentCode::COLLECTIVE_PAYMENT
-                && $breakdown['memberId'] !== $payload['memberId']
-            ) {
-                return response()->json(['error' => 'Breakdown memberId must match payment memberId'], 400);
-            }
-        }
-
-        $breakdownTotal = collect($payload['breakdowns'])->sum('amount');
-        if (round($breakdownTotal, 2) !== round((float) $payload['amount'], 2)) {
-            return response()->json(['error' => 'Breakdown amounts must sum to payment amount'], 400);
-        }
-
-        foreach ($payload['breakdowns'] as $breakdown) {
-            if ($error = $this->validateFundsAccount($tenantId, $breakdown['fundsAccountId'])) {
-                return $error;
-            }
-            if ($error = $this->validateMember($tenantId, $breakdown['memberId'])) {
-                return $error;
-            }
-        }
-
-        if ($error = $this->validateMember($tenantId, $payload['memberId'])) {
+        if ($error = $this->checkIsAmmountValid($tenantId, $payload)) {
             return $error;
         }
 
-        $paymentDate = $payload['date'] ?? now();
+        if ($error = $this->validateMember($tenantId, $payload['payerMemberId'])) {
+            return $error;
+        }
+
+        $paymentDate = $payload['paymentDate'] ?? now();
+        $code = (int) ($payload['code'] ?? PaymentCode::MONTHLY_PAYMENT);
 
         $payment = DB::transaction(function () use ($payload, $tenantId, $request, $code, $paymentDate) {
             $payment = Payment::create([
-                'memberId' => $payload['memberId'],
+                'memberId' => $payload['payerMemberId'],
                 'amount' => $payload['amount'],
                 'date' => $paymentDate,
                 'tenantId' => $tenantId,
@@ -143,55 +216,150 @@ class PaymentController extends BaseApiController
                 'notes' => $payload['notes'] ?? null,
             ]);
 
-            $fundSpread = [];
+            $paymentAux = PaymentAux::create([
+                'tenantId' => $tenantId,
+                'paymentId' => $payment->id,
+                'year' => $payload['year'],
+                'month' => $payload['month'],
+                'groupId' => $payload['groupId'],
+                'incentiveAmount' => $payload['incentiveAmount'],
+                'amountPerMember' => collect($payload['memberPaymentBreakdown'])->sum('amount'),
+                'totalMember' => $payload['checklistIncluded'] ? count($payload['selectedMembers']) : $payload['numberOfPaid'],
+            ]);
+
             foreach ($payload['breakdowns'] as $breakdown) {
-                $keyPeriod = $breakdown['year'] .'-'. $breakdown['month'];
-                $fundSpread[$breakdown['fundsAccountId']] = ($fundSpread[$breakdown['fundsAccountId']] ?? 0) + $breakdown['amount'];
                 PaymentBreakdown::create([
                     'paymentId' => $payment->id,
-                    'memberId' => $breakdown['memberId'],
                     'amount' => $breakdown['amount'],
                     'fundsAccountId' => $breakdown['fundsAccountId'],
-                    'month' => $breakdown['month'],
-                    'year' => $breakdown['year'],
                     'notes' => $breakdown['notes'] ?? null,
                 ]);
             }
 
-            $spreadedIncentiveAmount = $payload['incentiveAmount'] ?? 0;
-            if ($spreadedIncentiveAmount > 0) {
-                $groupRepository = new GroupRepository();
-                $groupNames = $groupRepository->getGroupNameByMemberIds(collect($payload['breakdowns'])->pluck('memberId')->unique())->implode(', ');
-
-                $typeRepository = new TypeRepository();
-                $description = collect($payload['breakdowns'])
-                    ->groupBy('month', 'year')
-                    ->map(function($br) {
-                        $brf = $br->first();
-                        return Carbon::create($brf['year'], $brf['month'], 1)->startOfDay()->format('M Y') .
-                            ' - ' . collect($br)->pluck('memberId')->unique()->count() . ' KK';
-                    })
-                    ->implode(', ');
-
-                $expense = Expense::create([
-                    'title' => 'Apresiasi Setoran Blok ' . $groupNames,
-                    'typeId' => $typeRepository->getSystemTypeId($tenantId, TypeCode::EXPENSE_COLLECTION_INCENTIVE),
-                    'description' => 'Peyetoran: ' . $description,
-                    'amount' => $payload['incentiveAmount'],
-                    'memberId' => $payload['memberId'],
-                    'date' => $paymentDate,
-                    'status' => 'paid',
-                    'treasurerId' => $request->user()->id,
+            foreach ($payload['selectedMembers'] as $memberId) {
+                PaymentMember::create([
                     'tenantId' => $tenantId,
+                    'memberId' => $memberId,
+                    'paymentId' => $payment->id,
+                    'month' => $payload['month'],
+                    'year' => $payload['year'],
+                    'amount' => collect($payload['memberPaymentBreakdown'])->sum('amount'),
+                    'paymentBreakdown' => $payload['memberPaymentBreakdown'] ?? [],
+                ]);
+            }
+
+            $fundsAccountRepository = new FundsAccountRepository();
+            $defaultFundAccount = $fundsAccountRepository->getDefaultFundsAccount($tenantId);
+            $defaultFundAccountId = $defaultFundAccount->id;
+
+            $paymentRepository = new PaymentRepository();
+
+            foreach ($payload['selectedOweMembers'] as $oweMember) {
+                $paymentRecord = $paymentRepository->getPaymentMemberRecord($tenantId, $oweMember['memberId'], $payload['year'], $payload['month']);
+                PaymentBreakdown::create([
+                    'paymentId' => $payment->id,
+                    'amount' => $oweMember['amountOwed'],
+                    'fundsAccountId' => $defaultFundAccountId,
+                    'notes' => 'Pelunasan',
                 ]);
 
-                $this->spreadIncentiveAmount($fundSpread, $payload['incentiveAmount']);
-                foreach ($fundSpread as $fundsAccountId => $amount) {
-                    ExpenseSourceOfFunds::create([
-                        'expenseId' => $expense->id,
-                        'amount' => $amount,
-                        'fundsAccountId' => $fundsAccountId,
+                $paymentRecord->amount += $oweMember['amountOwed'];
+                $paymentRecord->save();
+            }
+
+            return $payment;
+        });
+
+        return response()->json($payment->load(['member', 'breakdowns.fundsAccount']));
+    }
+
+    public function storeSinglePayment(Request $request): JsonResponse
+    {
+        if ($forbidden = $this->ensureRole($request, [Roles::SUPER_ADMIN, Roles::TENANT_ADMIN])) {
+            return $forbidden;
+        }
+
+        $tenantId = $this->resolveTenantId($request);
+        if (!$tenantId) {
+            return response()->json(['error' => 'Tenant ID is required'], 400);
+        }
+
+        $payload = $request->validate([
+            'memberId' => 'required|uuid',
+            'fundsAccountId' => 'required|uuid',
+            'amount' => 'required|numeric|min:0',
+            'code' => 'nullable|integer|in:' . implode(',', array_keys(PaymentCode::getOptions())),
+            'status' => 'nullable|string',
+            'date' => 'nullable|date',
+            'notes' => 'nullable|string',
+            'year' => 'nullable|integer',
+            'month' => 'nullable|integer',
+        ]);
+
+        if ($error = $this->validateMember($tenantId, $payload['memberId'])) {
+            return $error;
+        }
+
+        if ($error = $this->validateFundsAccount($tenantId, $payload['fundsAccountId'])) {
+            return $error;
+        }
+
+        $paymentDate = $payload['date'] ?? now();
+        $settingRepository = new SettingRepository();
+
+        $payment = DB::transaction(function () use ($payload, $tenantId, $request, $paymentDate, $settingRepository) {
+            $payment = Payment::create([
+                'memberId' => $payload['memberId'],
+                'amount' => $payload['amount'],
+                'date' => $paymentDate,
+                'tenantId' => $tenantId,
+                'treasurerId' => $request->user()->id,
+                'status' => $payload['status'] ?? 'paid',
+                'code' => $payload['code'] ?? PaymentCode::MONTHLY_PAYMENT,
+                'notes' => $payload['notes'] ?? null,
+            ]);
+
+            $member = Member::query()
+                ->where('id', $payload['memberId'])
+                ->where('tenantId', $tenantId)
+                ->first();
+
+            PaymentBreakdown::create([
+                'paymentId' => $payment->id,
+                'amount' => $payload['amount'],
+                'fundsAccountId' => $payload['fundsAccountId'],
+                'notes' => $payload['notes'] ?? null,
+            ]);
+
+            $tenantType = $settingRepository->getSetting($tenantId, Constants::SETTING_TENANT_TYPE) ?? Constants::TENANT_TYPE_NEIGHBORHOOD;
+            if ($tenantType === Constants::TENANT_TYPE_NEIGHBORHOOD and $payload['code'] === PaymentCode::MONTHLY_PAYMENT) {
+                $paymentAux = PaymentAux::create([
+                    'tenantId' => $tenantId,
+                    'paymentId' => $payment->id,
+                    'year' => $payload['year'],
+                    'month' => $payload['month'],
+                    'groupId' => $member->groupId
+                ]);
+
+                $paymentRecord = $paymentRepository->getPaymentMemberRecord($tenantId, $payload['memberId'], $payload['year'], $payload['month']);
+                if (!$paymentRecord) {
+                    PaymentMember::create([
+                        'tenantId' => $tenantId,
+                        'memberId' => $payload['memberId'],
+                        'paymentId' => $payment->id,
+                        'month' => $payload['month'],
+                        'year' => $payload['year'],
+                        'amount' => $payload['amount'],
+                        'paymentBreakdown' => [
+                            [
+                                'amount' => $payload['amount'],
+                                'fundsAccountId' => $payload['fundsAccountId'],
+                            ],
+                        ],
                     ]);
+                } else {
+                    $paymentRecord->amount += $payload['amount'];
+                    $paymentRecord->save();
                 }
             }
 
@@ -201,25 +369,21 @@ class PaymentController extends BaseApiController
         return response()->json($payment->load(['member', 'breakdowns.fundsAccount']));
     }
 
-    private function spreadIncentiveAmount(array &$fundSpread, int $incentiveAmount): void
+    private function checkIsAmmountValid($tenantId, $payload)
     {
-        $outstandingAmount = $incentiveAmount;
-        $incentiveAmount = $incentiveAmount / 100;
-        $totalAmount = array_sum($fundSpread);
-        $spreadedIncentiveAmount = [];
-        foreach ($fundSpread as $fundsAccountId => $amount) {
-            $percentage = $amount / $totalAmount;
-            $spreadAmount = round($incentiveAmount * $percentage, mode: PHP_ROUND_HALF_DOWN) * 100;
-            $outstandingAmount -= $spreadAmount;
-            $spreadedIncentiveAmount[$fundsAccountId] = $spreadAmount;
+        $breakdownTotal = collect($payload['breakdowns'])->sum('amount');
+        $totalAmountOwed = collect($payload['selectedOweMembers'])->sum('amountOwed');
+        if (round($breakdownTotal, 2) + round($totalAmountOwed, 2) !== round((float) $payload['amount'], 2)) {
+            return response()->json(['error' => 'Breakdown amounts must sum to payment amount'], 400);
         }
 
-        if ($outstandingAmount > 0) {
-            $firstAccountId = array_key_first($fundSpread);
-            $spreadedIncentiveAmount[$firstAccountId] += $outstandingAmount;
+        foreach ($payload['breakdowns'] as $breakdown) {
+            if ($error = $this->validateFundsAccount($tenantId, $breakdown['fundsAccountId'])) {
+                return $error;
+            }
         }
 
-        $fundSpread = $spreadedIncentiveAmount;
+        return null;
     }
 
     private function validateFundsAccount(string $tenantId, string $fundsAccountId): ?JsonResponse
@@ -257,13 +421,9 @@ class PaymentController extends BaseApiController
             return $forbidden;
         }
 
-        $query = Payment::query()->where('id', $payment);
-        if ($request->user()?->role !== Roles::SUPER_ADMIN) {
-            $query->where('tenantId', $request->user()?->tenantId);
-        }
-
         try {
-            $query->delete();
+            $paymentRepository = new PaymentRepository();
+            $paymentRepository->delete($request->user(), $payment);
             return response()->json(['success' => true]);
         } catch (QueryException) {
             return response()->json(['error' => 'Cannot delete payment: referenced by other records.'], 400);

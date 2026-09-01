@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Group;
 use App\Support\Roles;
+use App\Support\Constants;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,6 +25,49 @@ class GroupController extends BaseApiController
         });
 
         return response()->json($groups);
+    }
+
+    public function getMonthlyPayments(Request $request): JsonResponse
+    {
+        $payload = $request->validate([
+            'tenantId' => 'required|uuid',
+            'groupId' => 'required|uuid',
+            'year' => 'required|numeric',
+            'month' => 'required|numeric',
+        ]);
+
+        $groupRepository = new \App\Repositories\GroupRepository();
+        $monthlyPayments = $groupRepository->getMonthlyPayments($payload);
+        $totalMember = Collect($monthlyPayments)->filter(function($v) {
+            if ($v->status != Constants::STATUS_ACTIVE) {
+                return false;
+            }
+            if ($v->whitelisted) {
+                return false;
+            }
+
+            return true;
+        })->count();
+        $totalPaid = Collect($monthlyPayments)->filter(function($v) {
+            return !!$v->amountPaid;
+        })->count();
+
+        // $settingRepository = new SettingRepository();
+        // $targetCollectionRate = $settingRepository->getSetting($tenantId, Constants::SETTING_TARGET_COLLECTION_RATE);
+        $targetCollectionRate = 80;
+        $totalTarget = (int) floor($totalMember * ($targetCollectionRate / 100));
+
+        return response()->json([
+            'groupId' => $payload['groupId'],
+            'year' => $payload['year'],
+            'month' => $payload['month'],
+            'totalMember' => $totalMember,
+            'totalTarget' => $totalTarget,
+            'totalPaid' => $totalPaid,
+            'targetCollectionRate' => $targetCollectionRate,
+            'totalPayable' => $totalTarget - $totalPaid,
+            'bill' => $monthlyPayments,
+        ]);
     }
 
     public function store(Request $request): JsonResponse

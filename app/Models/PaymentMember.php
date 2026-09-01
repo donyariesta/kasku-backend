@@ -2,39 +2,38 @@
 
 namespace App\Models;
 
+use App\Support\PaymentCode;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class PaymentBreakdown extends Model
+class PaymentMember extends Model
 {
     use HasFactory, HasUuids;
 
-    protected $table = 'PaymentBreakdown';
+    protected $table = 'PaymentMember';
     public $timestamps = false;
-    public static $snakeAttributes = false;
 
     protected $fillable = [
+        'memberId',
+        'tenantId',
         'paymentId',
-        'amount',
-        'fundsAccountId',
         'month',
         'year',
-        'notes',
+        'amount',
+        'paymentBreakdown',
+
     ];
 
     protected $casts = [
         'amount' => 'float',
+        'paymentBreakdown' => 'array',
     ];
 
-    public function payment(): BelongsTo
+    public function member(): BelongsTo
     {
-        return $this->belongsTo(Payment::class, 'paymentId');
-    }
-
-    public function fundsAccount(): BelongsTo
-    {
-        return $this->belongsTo(FundsAccount::class, 'fundsAccountId');
+        return $this->belongsTo(Member::class, 'memberId');
     }
 }

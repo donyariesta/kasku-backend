@@ -41,6 +41,7 @@ Route::middleware('api.auth')->group(function (): void {
     Route::get('groups', [GroupController::class, 'index']);
     Route::post('groups', [GroupController::class, 'store']);
     Route::delete('groups/{group}', [GroupController::class, 'destroy']);
+    Route::get('groups/monthly-payments', [GroupController::class, 'getMonthlyPayments']);
 
     Route::get('members', [MemberController::class, 'index']);
     Route::post('members', [MemberController::class, 'store']);
@@ -57,7 +58,11 @@ Route::middleware('api.auth')->group(function (): void {
     Route::get('reports/financial-summary', [FinancialSummaryController::class, 'index']);
 
     Route::get('payments', [PaymentController::class, 'index']);
+    Route::get('single-payments/form-data', [PaymentController::class, 'getFormData']);
+    Route::get('payments/{paymentId}/edit-payor-form-data', [PaymentController::class, 'getEditPayorFormData']);
     Route::post('payments', [PaymentController::class, 'store']);
+    Route::post('single-payments', [PaymentController::class, 'storeSinglePayment']);
+    Route::put('payments/{payment}/payor', [PaymentController::class, 'updatePaymentPayor']);
     Route::delete('payments/{payment}', [PaymentController::class, 'destroy']);
 
     Route::get('expenses', [ExpenseController::class, 'index']);

@@ -28,6 +28,7 @@ class SettingRepository
         $mapping = [
             Constants::SETTING_TENANT_TYPE => 'stringValue',
             Constants::SETTING_PAYMENT_COLLECTION_STARTDATE => 'dateValue',
+            Constants::SETTING_TARGET_COLLECTION_RATE => 'numberValue',
         ];
 
         return $mapping[$fieldId] ?? 'stringValue';

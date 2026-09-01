@@ -10,15 +10,19 @@ class ExpenseRepository
 {
     public function getExpensesTypeOnMonth($tenantId, $year, $month)
     {
-        $monthStart = Carbon::create($year, $month, 1)->startOfDay();
-        $monthEnd = Carbon::create($year, $month, 1)->endOfMonth()->endOfDay();
-
-        return Expense::query()
+        $query = Expense::query()
             ->from('Expense as e')
             ->join('Type as t', 't.id', '=', 'e.typeId')
-            ->where('e.tenantId', $tenantId)
-            ->whereBetween('e.date', [$monthStart, $monthEnd])
-            ->select('t.type')
+            ->where('e.tenantId', $tenantId);
+
+        if (!empty($year) && !empty($month)) {
+            $monthStart = Carbon::create($year, $month, 1)->startOfDay();
+            $monthEnd = Carbon::create($year, $month, 1)->endOfMonth()->endOfDay();
+
+            $query->whereBetween('e.date', [$monthStart, $monthEnd]);
+        }
+
+        return $query->select('t.type')
             ->selectRaw('SUM(amount) as amount')
             ->groupBy('t.type')
             ->get();

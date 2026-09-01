@@ -7,25 +7,29 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class PaymentBreakdown extends Model
+class PaymentAux extends Model
 {
     use HasFactory, HasUuids;
 
-    protected $table = 'PaymentBreakdown';
+    protected $table = 'PaymentAux';
     public $timestamps = false;
     public static $snakeAttributes = false;
 
     protected $fillable = [
+        'tenantId',
         'paymentId',
-        'amount',
-        'fundsAccountId',
         'month',
         'year',
-        'notes',
+        'groupId',
+        'incentiveAmount',
+        'totalMember',
+        'amountPerMember',
     ];
 
     protected $casts = [
-        'amount' => 'float',
+        'amountPerMember' => 'float',
+        'incentiveAmount' => 'float',
+        'totalMember' => 'integer',
     ];
 
     public function payment(): BelongsTo
@@ -33,8 +37,9 @@ class PaymentBreakdown extends Model
         return $this->belongsTo(Payment::class, 'paymentId');
     }
 
-    public function fundsAccount(): BelongsTo
+    public function group(): BelongsTo
     {
-        return $this->belongsTo(FundsAccount::class, 'fundsAccountId');
+        return $this->belongsTo(Group::class, 'groupId');
     }
+
 }

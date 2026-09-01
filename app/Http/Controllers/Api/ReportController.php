@@ -49,13 +49,15 @@ class ReportController extends BaseApiController
         $tenantId = $this->resolveTenantId($request);
         $paymentRepository = new PaymentRepository();
         $overdue = $paymentRepository->getOverdue($tenantId, $payload['groupId'] ?? null);
-        $overdue = Collect($overdue)->map(function ($item) {
-            $periods = collect(json_decode($item->overduePeriods, true))->map(function ($period) {
-                return Carbon::parse($period)->format('M Y');
-            })->implode(', ');
-
-            return array_merge(Collect($item)->toArray(), ['overduePeriods' => $periods]);
-        });
+        $overdue = Collect($overdue)->groupBy('id')->map(function ($item) {
+            $first = $item->first();
+            return array_merge(
+                Collect($first)->toArray()
+                , [
+                    'overduePeriods' => $item->map(fn($i) => Carbon::parse($i->overduePeriods)->format('M Y'))->toArray()
+                ]
+            );
+        })->values();
 
         return response()->json($overdue);
     }
