@@ -506,7 +506,7 @@ GROUP BY p.id
     , pa.totalMember
     , pa.amountPerMember
     , pa.incentiveAmount
-ORDER BY P.date DESC
+ORDER BY p.date DESC
 SQL;
 
         return DB::select($sql, $binds);
