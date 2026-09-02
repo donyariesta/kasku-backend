@@ -338,7 +338,10 @@ class PaymentController extends BaseApiController
                     'paymentId' => $payment->id,
                     'year' => $payload['year'],
                     'month' => $payload['month'],
-                    'groupId' => $member->groupId
+                    'groupId' => $member->groupId,
+                    'incentiveAmount' => 0,
+                    'totalMember' => 1,
+                    'amountPerMember' => $payload['amount'],
                 ]);
 
                 $paymentRecord = $paymentRepository->getPaymentMemberRecord($tenantId, $payload['memberId'], $payload['year'], $payload['month']);

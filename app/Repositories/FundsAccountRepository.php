@@ -88,7 +88,7 @@ class FundsAccountRepository
         return PaymentBreakdown::query()
             ->from('PaymentBreakdown as pb')
             ->join('Payment as p', 'p.id', '=', 'pb.paymentId')
-            ->join('PaymentAux as pa', 'p.id', '=', 'pa.paymentId')
+            ->leftJoin('PaymentAux as pa', 'p.id', '=', 'pa.paymentId')
             ->where('p.tenantId', $tenantId)
             ->where('p.date', '<=', $date)
             ->when($fundsAccountId, function ($query) use ($fundsAccountId) {
@@ -98,7 +98,9 @@ class FundsAccountRepository
             ->selectRaw('SUM(pb.amount) as amount')
             ->groupBy('pb.fundsAccountId', 'pa.year', 'pa.month')
             ->get()->map(function($payment) use ($date, $depositFundsAccountId) {
-                if ($payment->year > $date->year) {
+                if (empty($payment->year) or empty($date->year)) {
+                    $fundsAccountId = $payment->fundsAccountId;
+                } else if ($payment->year > $date->year) {
                     $fundsAccountId = $depositFundsAccountId;
                 } else if ($payment->year == $date->year and $payment->month > $date->month) {
                     $fundsAccountId = $depositFundsAccountId;

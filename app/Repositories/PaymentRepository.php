@@ -269,7 +269,7 @@ FROM RawSummary as rs
 
         return Payment::query()
             ->from('Payment as p')
-            ->join('PaymentAux as pa', 'p.id', '=', 'pa.paymentId')
+            ->leftJoin('PaymentAux as pa', 'p.id', '=', 'pa.paymentId')
             ->join('PaymentBreakdown as pb', 'p.id', '=', 'pb.paymentId')
             ->join('Member as m', 'm.id', '=', 'p.memberId')
             ->when($filter['tenantId'], function ($query) use ($filter) {
@@ -315,8 +315,16 @@ FROM RawSummary as rs
                 $description = 'Iuran ' . $periods;
                 if ((int) $firstPayment['code'] === PaymentCode::COLLECTIVE_PAYMENT) {
                     $description = ($firstPayment['notes'] ?: 'Pembayaran kolektif') . ' - ' . $memberCount . ' KK: ' . $periods;
+                    $groupName = $groups[$firstPayment['groupId']];
+                } elseif ((int) $firstPayment['code'] === PaymentCode::MONTHLY_PAYMENT) {
+                    $description = ($firstPayment['notes'] ?: 'Pembayaran iuran') . ' - ' . $periods;
+                    $groupName = $groups[$firstPayment['groupId']];
                 } elseif ((int) $firstPayment['code'] === PaymentCode::DONATION) {
-                    $description =  $firstPayment['notes'] ?: 'Donasi / sponsor';
+                    $groupName = 'Donatur';
+                    $description =  $firstPayment['notes'] ?: 'Donasi';
+                } elseif ((int) $firstPayment['code'] === PaymentCode::SPONSORSHIP) {
+                    $groupName = 'Sponsor';
+                    $description =  $firstPayment['notes'] ?: 'Sponsorship';
                 }
 
                 return [
@@ -324,7 +332,7 @@ FROM RawSummary as rs
                     'memberName' => $firstPayment['memberName'],
                     'houseNumber' => $firstPayment['houseNumber'],
                     'description' => $description,
-                    'groupName' => $groups[$firstPayment['groupId']],
+                    'groupName' => $groupName,
                     'fundsAccountName' => $fundAccountslabel,
                     'amount' => $payments->sum('amount'),
                 ];
@@ -344,9 +352,9 @@ FROM RawSummary as rs
 
         return Payment::query()
             ->from('Payment as p')
-            ->join('PaymentAux as pa', 'p.id', '=', 'pa.paymentId')
             ->join('PaymentBreakdown as pb', 'p.id', '=', 'pb.paymentId')
-            ->join('Group as g', 'pa.groupId', '=', 'g.id')
+            ->leftJoin('PaymentAux as pa', 'p.id', '=', 'pa.paymentId')
+            ->leftJoin('Group as g', 'pa.groupId', '=', 'g.id')
             ->where('p.tenantId', $tenantId)
             ->when(!empty($monthStart) && !empty($monthEnd), function ($query) use ($monthStart, $monthEnd, $depositFundsAccountId) {
                 $query->where(function ($q) use ($monthStart, $monthEnd, $depositFundsAccountId) {
@@ -377,7 +385,7 @@ FROM RawSummary as rs
                 if (empty($monthStart)) {
                     $groupName = $payment->groupName;
                     $groupKey = $paymentPeriod->format('M');
-                } else if ($payment->code === PaymentCode::DONATION) {
+                } else if (in_array($payment->code, [PaymentCode::DONATION, PaymentCode::SPONSORSHIP])) {
                     $groupKey = 'other';
                     $groupName = 'Pendapatan Lain';
                     $groupId = '003';
