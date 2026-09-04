@@ -42,6 +42,9 @@ class ExpenseRepository
         if (!empty($filter['betweenDate'])) {
             $query->whereBetween('date', $filter['betweenDate']);
         }
+        if (!empty($filter['pendingPayment'])) {
+            $query->whereIn('status', ['pending', 'unpaid']);
+        }
 
         $expenses = $query->get();
 

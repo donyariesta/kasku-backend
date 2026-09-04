@@ -16,9 +16,16 @@ class ExpenseController extends BaseApiController
 {
     public function index(Request $request): JsonResponse
     {
+        $payload = $request->validate([
+            'pendingPayment' => 'nullable|boolean',
+        ]);
+
         $repository = new ExpenseRepository();
         $tenantId = $this->resolveTenantId($request);
-        return response()->json($repository->getExpenses(['tenantId' => $tenantId]));
+        return response()->json($repository->getExpenses([
+            ...$payload,
+            'tenantId' => $tenantId
+        ]));
     }
 
     public function store(Request $request): JsonResponse

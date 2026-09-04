@@ -41,6 +41,7 @@ class FundsAccountRepository
                 $transferFromAmount = $transferFrom->get($accountId, 0);
 
                 return [
+                    'isPublic' => empty($account->groupId),
                     'isDeposit' => $account->isDeposit(),
                     'asOfDate' => $date,
                     'active' => $account->active,
