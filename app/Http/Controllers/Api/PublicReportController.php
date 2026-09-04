@@ -143,14 +143,15 @@ class PublicReportController extends Controller
     {
         $monthStart = Carbon::create(2025, 01, 1, 0, 0, 0, 'Asia/Jakarta')->startOfDay();
         $monthEnd = Carbon::create(now()->year, now()->month, 1, 0, 0, 0, 'Asia/Jakarta')->endOfMonth()->endOfDay();
+        $lastMonthEnd = Carbon::create(2025, 01, 1, 0, 0, 0, 'Asia/Jakarta')->subDay()->endOfDay();
         if ($month && $year) {
             $monthStart = Carbon::create($year, $month, 1, 0, 0, 0, 'Asia/Jakarta')->startOfDay();
+            $lastMonthEnd = Carbon::create($year, $month, 1, 0, 0, 0, 'Asia/Jakarta')->subDay()->endOfDay();
             $monthEnd = Carbon::create($year, $month, 1, 0, 0, 0, 'Asia/Jakarta')->endOfMonth()->endOfDay();
         }
-        $lastMonthEnd = clone $monthStart;
 
         $fundsAccountRepository = new FundsAccountRepository();
-        $openingBalances = $fundsAccountRepository->getBalanceUntil($tenantId, $lastMonthEnd->subDay(), null);
+        $openingBalances = $fundsAccountRepository->getBalanceUntil($tenantId, $lastMonthEnd, null);
         $closingBalances = $fundsAccountRepository->getBalanceUntil($tenantId, $monthEnd, null);
 
         $expenseRepository = new ExpenseRepository();
