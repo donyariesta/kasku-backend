@@ -278,7 +278,7 @@ FROM RawSummary as rs
             ->when($filter['betweenDate'], function ($query) use ($filter) {
                 $query->whereBetween('p.date', $filter['betweenDate']);
             })
-            ->select('p.date', 'm.name as memberName', 'm.houseNumber', 'pa.groupId', 'pb.fundsAccountId', 'pa.year', 'pa.month', 'pb.amount', 'p.code', 'p.id', 'p.notes', 'pa.totalMember')
+            ->select('p.date', 'm.name as memberName', 'm.houseNumber', 'pa.groupId', 'pb.fundsAccountId', 'pa.year', 'pa.month', 'pb.amount', 'p.code', 'p.id', 'p.notes', 'pa.totalMember', 'p.payorAlias')
             ->get()->map(function($payment) use ($fundAccounts, $depositFundsAccountId) {
                 $fundsAccountId = $payment->fundsAccountId;
                 $type = 'income';
@@ -313,6 +313,8 @@ FROM RawSummary as rs
                 $memberCount = $payments->first()['totalMember'];
 
                 $description = 'Iuran ' . $periods;
+                $memberName = $firstPayment['payorAlias'] ?? $firstPayment['memberName'];
+                $houseNumber = !!$firstPayment['payorAlias'] ? null : $firstPayment['houseNumber'];
                 if ((int) $firstPayment['code'] === PaymentCode::COLLECTIVE_PAYMENT) {
                     $description = ($firstPayment['notes'] ?: 'Pembayaran kolektif') . ' - ' . $memberCount . ' KK: ' . $periods;
                     $groupName = $groups[$firstPayment['groupId']];
@@ -329,8 +331,8 @@ FROM RawSummary as rs
 
                 return [
                     'date' => $firstPayment['date'],
-                    'memberName' => $firstPayment['memberName'],
-                    'houseNumber' => $firstPayment['houseNumber'],
+                    'memberName' => $memberName,
+                    'houseNumber' => $houseNumber,
                     'description' => $description,
                     'groupName' => $groupName,
                     'fundsAccountName' => $fundAccountslabel,
@@ -486,6 +488,7 @@ FROM RawSummary as rs
         $sql = <<<SQL
 SELECT p.id
     , m.name payorName
+    , p.payorAlias payorAlias
     , m.houseNumber
     , g.name groupName
     , p.date

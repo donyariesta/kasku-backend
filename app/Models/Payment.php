@@ -25,6 +25,7 @@ class Payment extends Model
         'status',
         'code',
         'notes',
+        'payorAlias',
     ];
 
     protected $casts = [

@@ -289,6 +289,7 @@ class PaymentController extends BaseApiController
             'fundsAccountId' => 'required|uuid',
             'amount' => 'required|numeric|min:0',
             'code' => 'nullable|integer|in:' . implode(',', array_keys(PaymentCode::getOptions())),
+            'payorAlias' => 'nullable|string',
             'status' => 'nullable|string',
             'date' => 'nullable|date',
             'notes' => 'nullable|string',
@@ -310,6 +311,7 @@ class PaymentController extends BaseApiController
         $payment = DB::transaction(function () use ($payload, $tenantId, $request, $paymentDate, $settingRepository) {
             $payment = Payment::create([
                 'memberId' => $payload['memberId'],
+                'payorAlias' => $payload['payorAlias'],
                 'amount' => $payload['amount'],
                 'date' => $paymentDate,
                 'tenantId' => $tenantId,
