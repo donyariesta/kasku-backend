@@ -510,6 +510,7 @@ GROUP BY p.id
     , m.houseNumber
     , g.name
     , p.date
+    , p.payorAlias
     , p.amount
     , p.code
     , pa.month
