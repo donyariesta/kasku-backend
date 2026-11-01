@@ -50,8 +50,8 @@ Route::middleware('api.auth')->group(function (): void {
     Route::post('members/{member}/vacant', [MemberController::class, 'toggleVacant']);
     Route::delete('members/{member}', [MemberController::class, 'destroy']);
 
-    Route::post('whitelisted/delete/{whitelisted}', [WhitelistedController::class, 'destroy']);
-    Route::post('whitelisted/update/{whitelisted}', [WhitelistedController::class, 'update']);
+    Route::post('whitelisted/delete', [WhitelistedController::class, 'destroy']);
+    Route::post('whitelisted/update', [WhitelistedController::class, 'update']);
     Route::get('whitelisted', [WhitelistedController::class, 'index']);
     Route::post('whitelisted', [WhitelistedController::class, 'store']);
 

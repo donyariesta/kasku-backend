@@ -105,21 +105,14 @@ class WhitelistedController extends BaseApiController
         return response()->json($record->load(['member.group', 'type']));
     }
 
-    public function update(Request $request, string $whitelisted): JsonResponse
+    public function update(Request $request): JsonResponse
     {
         if ($forbidden = $this->ensureRole($request, [Roles::SUPER_ADMIN, Roles::TENANT_ADMIN])) {
             return $forbidden;
         }
 
-        $query = Whitelisted::query()->where('id', $whitelisted);
-        if ($request->user()?->role !== Roles::SUPER_ADMIN) {
-            $query->where('tenantId', $request->user()?->tenantId);
-        }
-
-        $record = $query->firstOrFail();
-        $tenantId = $record->tenantId;
-
         $payload = $request->validate([
+            'id' => 'required|uuid',
             'memberId' => 'sometimes|required|uuid',
             'dateFrom' => 'sometimes|required|date',
             'dateTo' => 'nullable|date',
@@ -127,6 +120,15 @@ class WhitelistedController extends BaseApiController
             'allowance' => 'sometimes|required|numeric|min:0',
             'notes' => 'nullable|string',
         ]);
+
+        $query = Whitelisted::query()->where('id', $payload['id']);
+        if ($request->user()?->role !== Roles::SUPER_ADMIN) {
+            $query->where('tenantId', $request->user()?->tenantId);
+        }
+
+        $record = $query->firstOrFail();
+        $tenantId = $record->tenantId;
+        unset($payload['id']);
 
         $memberId = $payload['memberId'] ?? $record->memberId;
         $dateFrom = $payload['dateFrom'] ?? $record->dateFrom->toDateString();
@@ -154,13 +156,15 @@ class WhitelistedController extends BaseApiController
         return response()->json($record->load(['member.group', 'type']));
     }
 
-    public function destroy(Request $request, string $whitelisted): JsonResponse
+    public function destroy(Request $request): JsonResponse
     {
         if ($forbidden = $this->ensureRole($request, [Roles::SUPER_ADMIN, Roles::TENANT_ADMIN])) {
             return $forbidden;
         }
 
-        $query = Whitelisted::query()->where('id', $whitelisted);
+        $payload = $request->validate(['id' => 'required|uuid']);
+
+        $query = Whitelisted::query()->where('id', $payload['id']);
         if ($request->user()?->role !== Roles::SUPER_ADMIN) {
             $query->where('tenantId', $request->user()?->tenantId);
         }
