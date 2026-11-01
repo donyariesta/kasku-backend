@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('public/reports/{tenantSlug}')->group(function (): void {
     Route::get('/', [PublicReportController::class, 'show']);
     Route::post('member-iuran', [PublicReportController::class, 'memberIuran']);
+    Route::get('kpi', [PublicReportController::class, 'kpi']);
     Route::put('member-pin', [PublicReportController::class, 'updateMemberPin']);
 });
 

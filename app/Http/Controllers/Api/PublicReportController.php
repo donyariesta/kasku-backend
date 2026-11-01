@@ -57,6 +57,23 @@ class PublicReportController extends Controller
         ]);
     }
 
+    public function kpi(Request $request, string $tenantSlug): JsonResponse
+    {
+        $payload = $request->validate([
+            'year' => 'required|integer|min:2000|max:2100',
+            'month' => 'nullable|integer|min:0|max:12',
+        ]);
+
+        $tenant = $this->findTenant($tenantSlug);
+        if (!$tenant) {
+            return response()->json(['error' => 'Report not found'], 404);
+        }
+
+        $kpi = (new PaymentRepository())->getKPI($tenant->id, $payload['year'], $payload['month'] ?? 0);
+
+        return response()->json($kpi);
+    }
+
     public function memberIuran(Request $request, string $tenantSlug): JsonResponse
     {
         $tenant = $this->findTenant($tenantSlug);
