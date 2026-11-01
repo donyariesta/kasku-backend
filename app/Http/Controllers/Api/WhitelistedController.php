@@ -33,6 +33,13 @@ class WhitelistedController extends BaseApiController
             $query->whereHas('member', fn ($q) => $q->where('groupId', $groupId));
         }
 
+        if (!$request->boolean('includeExpired')) {
+            $query->where(function ($q): void {
+                $q->whereNull('dateTo')
+                    ->orWhere('dateTo', '>=', Carbon::today()->toDateString());
+            });
+        }
+
         if ($request->filled('year')) {
             $year = (int) $request->query('year');
             if ($request->filled('month')) {
@@ -45,7 +52,10 @@ class WhitelistedController extends BaseApiController
             }
 
             $query->where('dateFrom', '<=', $periodEnd->toDateString())
-                ->where('dateTo', '>=', $periodStart->toDateString());
+                ->where(function ($q) use ($periodStart): void {
+                    $q->whereNull('dateTo')
+                        ->orWhere('dateTo', '>=', $periodStart->toDateString());
+                });
         }
 
         return response()->json($query->get());
@@ -65,7 +75,7 @@ class WhitelistedController extends BaseApiController
         $payload = $request->validate([
             'memberId' => 'required|uuid',
             'dateFrom' => 'required|date',
-            'dateTo' => 'required|date|after_or_equal:dateFrom',
+            'dateTo' => 'nullable|date|after_or_equal:dateFrom',
             'typeId' => 'required|uuid',
             'allowance' => 'required|numeric|min:0',
             'notes' => 'nullable|string',
@@ -81,13 +91,14 @@ class WhitelistedController extends BaseApiController
             $tenantId,
             $payload['memberId'],
             $payload['dateFrom'],
-            $payload['dateTo']
+            $payload['dateTo'] ?? null
         )) {
             return $error;
         }
 
         $record = Whitelisted::create([
             ...$payload,
+            'dateTo' => $payload['dateTo'] ?? null,
             'tenantId' => $tenantId,
         ]);
 
@@ -111,7 +122,7 @@ class WhitelistedController extends BaseApiController
         $payload = $request->validate([
             'memberId' => 'sometimes|required|uuid',
             'dateFrom' => 'sometimes|required|date',
-            'dateTo' => 'sometimes|required|date',
+            'dateTo' => 'nullable|date',
             'typeId' => 'sometimes|required|uuid',
             'allowance' => 'sometimes|required|numeric|min:0',
             'notes' => 'nullable|string',
@@ -119,9 +130,11 @@ class WhitelistedController extends BaseApiController
 
         $memberId = $payload['memberId'] ?? $record->memberId;
         $dateFrom = $payload['dateFrom'] ?? $record->dateFrom->toDateString();
-        $dateTo = $payload['dateTo'] ?? $record->dateTo->toDateString();
+        $dateTo = array_key_exists('dateTo', $payload)
+            ? $payload['dateTo']
+            : optional($record->dateTo)?->toDateString();
 
-        if ($dateFrom > $dateTo) {
+        if ($dateTo && $dateFrom > $dateTo) {
             return response()->json(['error' => 'dateTo must be on or after dateFrom'], 400);
         }
 
@@ -190,14 +203,17 @@ class WhitelistedController extends BaseApiController
         string $tenantId,
         string $memberId,
         string $dateFrom,
-        string $dateTo,
+        ?string $dateTo,
         ?string $excludeId = null
     ): ?JsonResponse {
         $query = Whitelisted::query()
             ->where('tenantId', $tenantId)
             ->where('memberId', $memberId)
-            ->where('dateFrom', '<=', $dateTo)
-            ->where('dateTo', '>=', $dateFrom);
+            ->where('dateFrom', '<=', $dateTo ?? '9999-12-31')
+            ->where(function ($q) use ($dateFrom): void {
+                $q->whereNull('dateTo')
+                    ->orWhere('dateTo', '>=', $dateFrom);
+            });
 
         if ($excludeId) {
             $query->where('id', '!=', $excludeId);

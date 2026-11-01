@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Member extends Model
 {
@@ -29,5 +30,10 @@ class Member extends Model
     public function group(): BelongsTo
     {
         return $this->belongsTo(Group::class, 'groupId');
+    }
+
+    public function whitelisted(): HasMany
+    {
+        return $this->hasMany(Whitelisted::class, 'memberId');
     }
 }

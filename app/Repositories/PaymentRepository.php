@@ -17,6 +17,7 @@ use App\Repositories\FundsAccountRepository;
 use App\Repositories\SettingRepository;
 use App\Support\PaymentCode;
 use App\Support\Constants;
+use App\Support\TypeCode;
 use Illuminate\Support\Facades\DB;
 use App\Support\Roles;
 
@@ -202,18 +203,54 @@ WITH RECURSIVE months AS (
     WHERE m.status = ?
     GROUP BY m.groupId
 )
+, VacantMembers AS (
+    SELECT wl.memberId
+        , YEAR(tm.lastDate) year
+        , tm.month
+    FROM TargetMonths tm
+        JOIN Whitelisted wl ON (
+            wl.dateFrom <= tm.lastDate
+            AND (wl.dateTo IS NULL OR wl.dateTo >= tm.lastDate)
+        )
+        JOIN Type t ON t.id = wl.typeId
+            AND t.isSystem = 1
+            AND t.code = ?
+    GROUP BY wl.memberId
+        , YEAR(tm.lastDate)
+        , tm.month
+)
 , WhitelistedSummary AS (
     SELECT YEAR(tm.lastDate) year
         , tm.month
         , m.groupId
-        , count(wl.memberId) numberOfWaitlisted
+        , count(DISTINCT wl.memberId) numberOfWaitlisted
     FROM TargetMonths tm
         JOIN Whitelisted wl ON (
-            tm.lastDate BETWEEN wl.dateFrom AND wl.dateTo
+            wl.dateFrom <= tm.lastDate
+            AND (wl.dateTo IS NULL OR wl.dateTo >= tm.lastDate)
         )
         JOIN Member m ON m.id = wl.memberId
+        JOIN Type t ON t.id = wl.typeId
+            AND NOT (t.isSystem = 1 AND t.code = ?)
+        LEFT JOIN VacantMembers vm ON (
+            vm.memberId = wl.memberId
+            AND vm.year = YEAR(tm.lastDate)
+            AND vm.month = tm.month
+        )
+    WHERE vm.memberId IS NULL
     GROUP BY YEAR(tm.lastDate)
         , tm.month
+        , m.groupId
+)
+, VacantSummary AS (
+    SELECT vm.year
+        , vm.month
+        , m.groupId
+        , count(DISTINCT vm.memberId) numberOfVacant
+    FROM VacantMembers vm
+        JOIN Member m ON m.id = vm.memberId
+    GROUP BY vm.year
+        , vm.month
         , m.groupId
 )
 , GroupDetails AS (
@@ -228,10 +265,10 @@ WITH RECURSIVE months AS (
         , g.name
         , YEAR(tm.lastDate) year
         , tm.month
-        , g.numberOfMember
+        , g.numberOfMember - COALESCE(vs.numberOfVacant, 0) numberOfMember
         , COALESCE(ws.numberOfWaitlisted, 0) numberOfWaitlisted
-        , g.numberOfMember - COALESCE(ws.numberOfWaitlisted, 0) effectiveNumberOfMember
-        , FLOOR((g.numberOfMember - COALESCE(ws.numberOfWaitlisted, 0)) * 0.8) target
+        , g.numberOfMember - COALESCE(vs.numberOfVacant, 0) - COALESCE(ws.numberOfWaitlisted, 0) effectiveNumberOfMember
+        , FLOOR((g.numberOfMember - COALESCE(vs.numberOfVacant, 0) - COALESCE(ws.numberOfWaitlisted, 0)) * 0.8) target
         , COALESCE(ps.numberOfPayor, 0) numberOfPayor
         , COALESCE(ps.amount, 0) amount
     FROM GroupDetails as g
@@ -240,6 +277,11 @@ WITH RECURSIVE months AS (
             ws.groupId = g.id
             AND YEAR(tm.lastDate) = ws.year
             AND tm.month = ws.month
+        )
+        LEFT JOIN VacantSummary vs ON (
+            vs.groupId = g.id
+            AND YEAR(tm.lastDate) = vs.year
+            AND tm.month = vs.month
         )
         LEFT JOIN PaymentSummary ps ON (
             ps.groupId = g.id
@@ -256,7 +298,9 @@ FROM RawSummary as rs
     $tenantId,
     $year,
     $month,
-    'active'
+    'active',
+    TypeCode::MEMBER_VACANT,
+    TypeCode::MEMBER_VACANT,
 ]);
     }
 

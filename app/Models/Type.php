@@ -21,6 +21,13 @@ class Type extends Model
         'group',
         'type',
         'description',
+        'isSystem',
+        'code',
+    ];
+
+    protected $casts = [
+        'isSystem' => 'boolean',
+        'code' => 'integer',
     ];
 
     public function tenant(): BelongsTo
