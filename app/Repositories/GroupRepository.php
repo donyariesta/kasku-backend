@@ -3,6 +3,7 @@
 namespace App\Repositories;
 
 use App\Models\Member;
+use App\Support\TypeCode;
 use Carbon\Carbon;
 
 class GroupRepository
@@ -30,16 +31,27 @@ SELECT m.id "memberId"
     , m.name "name"
     , m.houseNumber "houseNumber"
     , m.status "status"
-    , (wl.id IS NOT NULL) "whitelisted"
+    , EXISTS (
+        SELECT 1 FROM Whitelisted wl
+            JOIN Type t ON t.id = wl.typeId
+        WHERE wl.memberId = m.id
+            AND wl.dateFrom <= :endPeriodDate
+            AND (wl.dateTo IS NULL OR wl.dateTo >= :endPeriodDate2)
+            AND NOT (t.isSystem = 1 AND t.code = :vacantCode)
+    ) "whitelisted"
+    , EXISTS (
+        SELECT 1 FROM Whitelisted wl
+            JOIN Type t ON t.id = wl.typeId
+        WHERE wl.memberId = m.id
+            AND wl.dateFrom <= :endPeriodDate3
+            AND (wl.dateTo IS NULL OR wl.dateTo >= :endPeriodDate4)
+            AND t.isSystem = 1
+            AND t.code = :vacantCode2
+    ) "isVacant"
     , pm.amount "amountPaid"
     , DATE(p.date) "paidDate"
     , pm.paymentId "paymentId"
 FROM Member m
-    LEFT JOIN Whitelisted wl ON (
-        wl.memberId = m.id
-        AND :endPeriodDate >= wl.dateFrom
-        AND :endPeriodDate2 <= wl.dateTo
-    )
     LEFT JOIN PaymentMember pm ON (
         pm.memberId = m.id
         AND pm.year = :year
@@ -54,6 +66,10 @@ SQL;
         return \DB::select($sql, [
             'endPeriodDate' => $endPeriodDate,
             'endPeriodDate2' => $endPeriodDate,
+            'endPeriodDate3' => $endPeriodDate,
+            'endPeriodDate4' => $endPeriodDate,
+            'vacantCode'     => TypeCode::MEMBER_VACANT,
+            'vacantCode2'    => TypeCode::MEMBER_VACANT,
             'tenantId'       => $tenantId,
             'groupId'        => $groupId,
             'year'           => $year,

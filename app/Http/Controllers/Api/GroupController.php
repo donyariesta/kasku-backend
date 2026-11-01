@@ -42,7 +42,7 @@ class GroupController extends BaseApiController
             if ($v->status != Constants::STATUS_ACTIVE) {
                 return false;
             }
-            if ($v->whitelisted) {
+            if ($v->whitelisted || $v->isVacant) {
                 return false;
             }
 
