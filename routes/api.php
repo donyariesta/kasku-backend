@@ -52,8 +52,8 @@ Route::middleware('api.auth')->group(function (): void {
 
     Route::get('whitelisted', [WhitelistedController::class, 'index']);
     Route::post('whitelisted', [WhitelistedController::class, 'store']);
-    Route::put('whitelisted/{whitelisted}', [WhitelistedController::class, 'update']);
-    Route::delete('whitelisted/{whitelisted}', [WhitelistedController::class, 'destroy']);
+    Route::post('whitelisted/update/{whitelisted}', [WhitelistedController::class, 'update']);
+    Route::post('whitelisted/delete/{whitelisted}', [WhitelistedController::class, 'destroy']);
 
     Route::get('iuran', [IuranController::class, 'index']);
 
