@@ -23,11 +23,13 @@ class Type extends Model
         'description',
         'isSystem',
         'code',
+        'active',
     ];
 
     protected $casts = [
         'isSystem' => 'boolean',
         'code' => 'integer',
+        'active' => 'boolean',
     ];
 
     public function tenant(): BelongsTo

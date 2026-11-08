@@ -537,6 +537,7 @@ SELECT p.id
     , g.name groupName
     , p.date
     , p.amount
+    , p.status
     , p.code
     , pa.month
     , pa.year
@@ -556,6 +557,7 @@ GROUP BY p.id
     , p.date
     , p.payorAlias
     , p.amount
+    , p.status
     , p.code
     , pa.month
     , pa.year

@@ -71,6 +71,7 @@ class TypeController extends BaseApiController
             'group' => 'sometimes|required|string|max:255',
             'type' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
+            'active' => 'sometimes|boolean',
         ]);
 
         try {
